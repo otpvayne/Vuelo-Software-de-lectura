@@ -7,8 +7,11 @@ export const IDLE_MS = 60_000;
 export const MIN_SESSION_SECONDS = 10;
 /** Oculta más tiempo que esto: al volver empieza una sesión nueva. */
 export const HIDDEN_ENDS_SESSION_MS = 5 * 60_000;
-/** Mientras se lee se guarda como mucho con esta frecuencia (nunca en cada giro de página). */
-const SAVE_EVERY_MS = 20_000;
+/**
+ * Mientras se lee se guarda como mucho con esta frecuencia (nunca en cada giro de página).
+ * Es un upsert por id con el total acumulado: guardar dos veces no duplica segundos.
+ */
+export const SAVE_EVERY_MS = 10_000;
 const TICK_MS = 1_000;
 
 /**
@@ -71,6 +74,8 @@ export class ReadingSessionTracker {
     document.addEventListener('visibilitychange', this.onVisibility);
     window.addEventListener('pagehide', this.onLeave);
     window.addEventListener('beforeunload', this.onLeave);
+    // Page Lifecycle (Android/Chromium): la página puede congelarse sin llegar a ocultarse.
+    document.addEventListener('freeze', this.onLeave);
     this.hidden = document.visibilityState === 'hidden';
     this.interval = setInterval(() => this.tick(), TICK_MS);
   }
@@ -84,6 +89,14 @@ export class ReadingSessionTracker {
     document.removeEventListener('visibilitychange', this.onVisibility);
     window.removeEventListener('pagehide', this.onLeave);
     window.removeEventListener('beforeunload', this.onLeave);
+    document.removeEventListener('freeze', this.onLeave);
+    this.tick();
+    this.persist(now());
+    return this.queue;
+  }
+
+  /** Guarda ya lo acumulado y espera a que se escriba (p. ej. antes de cerrar la ventana). */
+  flush(): Promise<void> {
     this.tick();
     this.persist(now());
     return this.queue;

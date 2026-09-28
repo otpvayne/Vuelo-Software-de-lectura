@@ -2,6 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
+import dynamic from 'next/dynamic';
+import type { BackupTab } from '@/components/backup/LibraryMenu';
+import BackupReminder from '@/components/backup/BackupReminder';
+import LibraryMenu from '@/components/backup/LibraryMenu';
 import AddBookButton from '@/components/library/AddBookButton';
 import ContinueReading, { pickContinue } from '@/components/library/ContinueReading';
 import DropOverlay from '@/components/library/DropOverlay';
@@ -20,6 +24,10 @@ import ThemeToggle from '@/components/ui/ThemeToggle';
 import ReadingSummaryChip from '@/components/stats/ReadingSummaryChip';
 import { APP_NAME, TAGLINE } from '@/lib/constants';
 import { getStore, type Book } from '@/lib/db';
+import { getStoredTheme, setTheme } from '@/lib/theme';
+
+/** El diálogo (y fflate) solo se descargan al abrirlo: no pesan en la carga de la biblioteca. */
+const BackupDialog = dynamic(() => import('@/components/backup/BackupDialog'), { ssr: false });
 
 /** Cuánto dura la animación de "entrar a la repisa" de un libro nuevo. */
 const NEW_BOOK_MS = 1600;
@@ -32,7 +40,9 @@ export default function LibraryPage() {
   const [sort, setSort] = useState<SortKey>('recientes');
   const [newIds, setNewIds] = useState<ReadonlySet<string>>(new Set());
 
-  useEffect(() => {
+  const [backup, setBackup] = useState<{ open: boolean; tab: BackupTab }>({ open: false, tab: 'exportar' });
+
+  const loadBooks = useCallback(() => {
     getStore()
       .then((store) => store.listBooks())
       .then(setBooks)
@@ -42,6 +52,15 @@ export default function LibraryPage() {
         setBooks([]);
       });
   }, []);
+  useEffect(loadBooks, [loadBooks]);
+
+  // Tras restaurar: recargar libros y aplicar el tema restaurado (si cambió).
+  const onRestored = useCallback(() => {
+    loadBooks();
+    const t = getStoredTheme();
+    if (t && t !== document.documentElement.dataset.theme) setTheme(t);
+    window.dispatchEvent(new CustomEvent('vuelo:metas'));
+  }, [loadBooks]);
 
   const onAdded = useCallback((book: Book) => {
     setBooks((prev) => [book, ...(prev ?? [])]);
@@ -85,6 +104,7 @@ export default function LibraryPage() {
         <ReadingSummaryChip />
         {hasBooks && <AddBookButton variant="compact" onFiles={importer.importFiles} busy={importer.busy} />}
         <ThemeToggle />
+        <LibraryMenu onBackup={(tab) => setBackup({ open: true, tab })} />
       </header>
 
       <main className="relative z-10 mx-auto max-w-[1344px] space-y-10 px-4 pb-24 pt-8 sm:px-8 sm:pt-10">
@@ -96,6 +116,7 @@ export default function LibraryPage() {
 
         {books === null ? null : hasBooks ? (
           <>
+            <BackupReminder books={books} onBackup={() => setBackup({ open: true, tab: 'exportar' })} />
             <AnimatePresence initial={false}>
               {continueBook && (
                 <motion.div
@@ -128,6 +149,14 @@ export default function LibraryPage() {
       <DropOverlay onFiles={importer.importFiles} />
       <ImportStatus progress={importer.progress} notices={importer.notices} onDismiss={importer.dismiss} />
       <Onboarding />
+      {backup.open && (
+        <BackupDialog
+          open={backup.open}
+          initialTab={backup.tab}
+          onClose={() => setBackup((b) => ({ ...b, open: false }))}
+          onRestored={onRestored}
+        />
+      )}
     </div>
   );
 }

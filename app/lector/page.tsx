@@ -43,6 +43,7 @@ import {
   setSoundEnabled,
   type PaperMode,
 } from '@/lib/readerPrefs';
+import { isTauri } from '@/lib/platform';
 import { getCurrentTheme } from '@/lib/theme';
 
 interface Loaded {
@@ -56,6 +57,9 @@ interface Loaded {
 
 /** Tiempo que un subrayado recién creado conserva su animación de "pintado". */
 const FRESH_MS = 1500;
+
+/** Espera máxima para guardar la sesión al cerrar la ventana (nunca bloquea el cierre). */
+const CLOSE_SAVE_TIMEOUT_MS = 1500;
 
 /** En modo enfoque, la interfaz se oculta tras este tiempo sin actividad en los bordes. */
 const FOCUS_IDLE_MS = 2500;
@@ -182,7 +186,28 @@ function Reader() {
       const w = window as unknown as { __vuelo?: Record<string, unknown> };
       if (w.__vuelo) w.__vuelo.session = tracker;
     }
+    // Tauri: al pedir cerrar la ventana, guardar la sesión ANTES de destruirla.
+    // Con un listener de close-requested, Tauri no cierra solo: onCloseRequested espera al
+    // handler y luego llama a destroy() (permiso core:window:allow-destroy). El guardado tiene
+    // un tope de tiempo para que nunca impida cerrar.
+    let unlistenClose: (() => void) | null = null;
+    let disposed = false;
+    if (isTauri()) {
+      void import('@tauri-apps/api/window')
+        .then(({ getCurrentWindow }) =>
+          getCurrentWindow().onCloseRequested(async () => {
+            await Promise.race([tracker.flush(), new Promise((r) => setTimeout(r, CLOSE_SAVE_TIMEOUT_MS))]);
+          }),
+        )
+        .then((un) => {
+          if (disposed) un();
+          else unlistenClose = un;
+        })
+        .catch((err: unknown) => console.error('Cierre de ventana:', err));
+    }
     return () => {
+      disposed = true;
+      unlistenClose?.();
       trackerRef.current = null;
       void tracker.stop();
     };

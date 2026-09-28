@@ -7,6 +7,7 @@ import type { DBSchema, IDBPDatabase } from 'idb';
 import type TauriDatabase from '@tauri-apps/plugin-sql';
 import { BOOKS_DIR, IDB_NAME, SQLITE_URL, isHighlightColor, type HighlightColor } from './constants';
 import { isTauri } from './platform';
+import { buildRestoreSql } from './backup/sql';
 
 // ───────────────────────────── Modelos ─────────────────────────────
 
@@ -84,6 +85,26 @@ export interface DayTotal {
   seconds: number;
 }
 
+/** Todo el contenido de la base (para respaldos). */
+export interface LibraryDump {
+  books: Book[];
+  notes: Note[];
+  highlights: Highlight[];
+  bookmarks: Bookmark[];
+  sessions: ReadingSession[];
+}
+
+/** Cambios de una restauración, aplicados de forma atómica (todo o nada). */
+export interface RestoreOps {
+  /** "Reemplazar todo": se borra lo actual dentro de la misma transacción. */
+  replaceAll: boolean;
+  books: Book[];
+  notes: Note[];
+  highlights: Highlight[];
+  bookmarks: Bookmark[];
+  sessions: ReadingSession[];
+}
+
 export type NewBook = Pick<Book, 'title' | 'author' | 'pageCount' | 'cover' | 'fileName'>;
 export type NewHighlight = Omit<Highlight, 'id' | 'createdAt'>;
 
@@ -122,6 +143,16 @@ export interface VueloStore {
   /** Totales por día, ordenados por día, calculados con agregación (sin cargar sesiones). */
   dailyTotals(): Promise<DayTotal[]>;
   listFinishedBooks(): Promise<Book[]>;
+
+  // ── Respaldos ──
+  dumpAll(): Promise<LibraryDump>;
+  /** Tamaño del PDF en bytes sin leerlo entero. */
+  bookFileSize(book: Book): Promise<number>;
+  /** Guarda un PDF para un libro (id nuevo) y devuelve su filePath. */
+  putBookFile(bookId: string, bytes: Uint8Array): Promise<string>;
+  deleteBookFile(filePath: string): Promise<void>;
+  /** Aplica una restauración en UNA transacción: si falla, no cambia nada. */
+  applyRestore(ops: RestoreOps): Promise<void>;
 }
 
 // ──────────────────────────── Utilidades ───────────────────────────
@@ -242,6 +273,25 @@ interface HighlightRow {
   note: string | null;
   created_at: number;
 }
+interface SessionRow {
+  id: string;
+  book_id: string;
+  started_at: number;
+  ended_at: number;
+  seconds_active: number;
+  pages_read: number;
+  day: string;
+}
+const toSession = (r: SessionRow): ReadingSession => ({
+  id: r.id,
+  bookId: r.book_id,
+  startedAt: r.started_at,
+  endedAt: r.ended_at,
+  secondsActive: r.seconds_active,
+  pagesRead: r.pages_read,
+  day: r.day,
+});
+
 interface BookmarkRow {
   id: string;
   book_id: string;
@@ -460,6 +510,45 @@ async function createSqliteStore(): Promise<VueloStore> {
       );
       return rows.map(toBook);
     },
+
+    async dumpAll() {
+      const [books, notes, highlights, bookmarks, sessions] = await Promise.all([
+        db.select<BookRow[]>('SELECT * FROM books ORDER BY added_at'),
+        db.select<NoteRow[]>('SELECT * FROM notes ORDER BY created_at'),
+        db.select<HighlightRow[]>('SELECT * FROM highlights ORDER BY created_at'),
+        db.select<BookmarkRow[]>('SELECT * FROM bookmarks ORDER BY created_at'),
+        db.select<SessionRow[]>('SELECT * FROM reading_sessions ORDER BY started_at'),
+      ]);
+      return {
+        books: books.map(toBook),
+        notes: notes.map(toNote),
+        highlights: highlights.map(toHighlight),
+        bookmarks: bookmarks.map(toBookmark),
+        sessions: sessions.map(toSession),
+      };
+    },
+    async bookFileSize(book) {
+      return (await fs.stat(book.filePath, base)).size;
+    },
+    async putBookFile(bookId, bytes) {
+      const filePath = `${BOOKS_DIR}/${bookId}.pdf`;
+      if (!(await fs.exists(BOOKS_DIR, base))) await fs.mkdir(BOOKS_DIR, { ...base, recursive: true });
+      await fs.writeFile(filePath, bytes, base);
+      return filePath;
+    },
+    async deleteBookFile(filePath) {
+      if (await fs.exists(filePath, base)) await fs.remove(filePath, base);
+    },
+    async applyRestore(ops) {
+      const sql = buildRestoreSql(ops);
+      try {
+        await db.execute(sql);
+      } catch (err) {
+        // Si una sentencia falla, la transacción queda abierta en esa conexión: se deshace.
+        await db.execute('ROLLBACK').catch(() => undefined);
+        throw err;
+      }
+    },
   };
   return store;
 }
@@ -641,6 +730,54 @@ async function createIdbStore(): Promise<VueloStore> {
     async listFinishedBooks() {
       const books = (await db.getAll('books')).map(withDefaults).filter((b) => b.progress >= 1);
       return books.sort((a, b) => (b.lastOpenedAt ?? b.addedAt) - (a.lastOpenedAt ?? a.addedAt));
+    },
+
+    async dumpAll() {
+      const [books, notes, highlights, bookmarks, sessions] = await Promise.all([
+        db.getAll('books'),
+        db.getAll('notes'),
+        db.getAll('highlights'),
+        db.getAll('bookmarks'),
+        db.getAll('sessions'),
+      ]);
+      return { books: books.map(withDefaults), notes, highlights, bookmarks, sessions };
+    },
+    async bookFileSize(book) {
+      return (await db.get('files', book.filePath))?.size ?? 0;
+    },
+    async putBookFile(bookId, bytes) {
+      await db.put('files', new Blob([bytes.slice()], { type: 'application/pdf' }), bookId);
+      return bookId;
+    },
+    async deleteBookFile(filePath) {
+      await db.delete('files', filePath);
+    },
+    async applyRestore(ops) {
+      // Una sola transacción de IndexedDB: si algo falla, se aborta entera.
+      const tx = db.transaction(['books', 'notes', 'highlights', 'bookmarks', 'sessions'], 'readwrite');
+      try {
+        if (ops.replaceAll) {
+          await Promise.all(
+            (['books', 'notes', 'highlights', 'bookmarks', 'sessions'] as const).map((s) => tx.objectStore(s).clear()),
+          );
+        }
+        for (const b of ops.books) await tx.objectStore('books').put(b);
+        for (const n of ops.notes) await tx.objectStore('notes').put(n);
+        for (const h of ops.highlights) await tx.objectStore('highlights').put(h);
+        for (const bm of ops.bookmarks) {
+          const same = await tx.objectStore('bookmarks').index('bookPage').get([bm.bookId, bm.page]);
+          if (!same) await tx.objectStore('bookmarks').put(bm);
+        }
+        for (const s of ops.sessions) await tx.objectStore('sessions').put(s);
+        await tx.done;
+      } catch (err) {
+        try {
+          tx.abort();
+        } catch {
+          // ya abortada
+        }
+        throw err;
+      }
     },
   };
 }
