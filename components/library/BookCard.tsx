@@ -6,6 +6,7 @@ import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { Star, Trash2, X } from 'lucide-react';
 import type { Book } from '@/lib/db';
 import GeneratedCover, { paletteClass } from './GeneratedCover';
+import { useLightCover } from './useCoverTone';
 
 export const readerHref = (id: string) => `/lector/?id=${encodeURIComponent(id)}`;
 
@@ -41,6 +42,7 @@ const BookCard = forwardRef<HTMLLIElement, BookCardProps>(function BookCard(
   const finished = book.progress >= 1;
   const started = percent > 0 && !finished;
   const spine = spineWidth(book.pageCount);
+  const lightCover = useLightCover(book.id, book.cover);
 
   const [tilted, setTilted] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -85,7 +87,8 @@ const BookCard = forwardRef<HTMLLIElement, BookCardProps>(function BookCard(
 
   const lift = tilted && !reduce;
   const status = finished ? 'terminado' : started ? `${percent}% leído` : 'sin empezar';
-  const ribbonLength = 0.2 + book.progress * 0.62;
+  // La cinta asoma por el pie del libro (fuera de la portada): su largo sigue el avance.
+  const ribbonLength = Math.round(8 + book.progress * 26);
 
   return (
     <motion.li
@@ -156,7 +159,11 @@ const BookCard = forwardRef<HTMLLIElement, BookCardProps>(function BookCard(
               }}
             />
             {/* Portada */}
-            <div className="absolute inset-0 overflow-hidden rounded-l-[3px] rounded-r-[6px] bg-papel shadow-libro">
+            <div
+              className={`absolute inset-0 overflow-hidden rounded-l-[3px] rounded-r-[6px] bg-papel shadow-libro ${
+                lightCover ? 'portada-clara' : ''
+              }`}
+            >
               {book.cover ? (
                 // eslint-disable-next-line @next/next/no-img-element -- data URL local
                 <img src={book.cover} alt="" className="size-full object-cover" draggable={false} />
@@ -166,28 +173,24 @@ const BookCard = forwardRef<HTMLLIElement, BookCardProps>(function BookCard(
               <span aria-hidden className="libro-brillo pointer-events-none absolute inset-0" />
             </div>
 
-            {/* Cinta marcapáginas: su largo sigue el progreso */}
+            {/* Cinta marcapáginas: cuelga del pie del libro, nunca sobre la portada */}
             {started && (
-              <div
+              <span
                 aria-hidden
-                className="absolute -top-1.5 right-[14%] flex w-[13px] flex-col items-center [transform:translateZ(1px)]"
-                style={{ height: `${ribbonLength * 100}%` }}
-              >
-                <span className="cinta h-full w-full bg-acento shadow-suave" />
-                <span className="mt-1 rounded-full bg-fondo/90 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-tinta shadow-suave backdrop-blur">
-                  {percent}%
-                </span>
-              </div>
+                className="cinta absolute right-[16%] top-full w-[11px] bg-acento shadow-suave [transform:translateZ(1px)]"
+                style={{ height: ribbonLength }}
+              />
             )}
 
-            {/* Terminado */}
+            {/* Terminado: sello pequeño en la esquina */}
             {finished && (
-              <div aria-hidden className="absolute inset-x-0 bottom-2 flex justify-center [transform:translateZ(1px)]">
-                <span className="flex items-center gap-1 rounded-full bg-fondo/90 px-2 py-1 text-[11px] font-semibold text-tinta shadow-suave backdrop-blur">
-                  <Star className="size-3.5 fill-acento text-acento" strokeWidth={1.5} />
-                  Terminado
-                </span>
-              </div>
+              <span
+                aria-hidden
+                title="Terminado"
+                className="absolute -right-2 -top-2 grid size-7 place-items-center rounded-full bg-fondo shadow-flotante ring-1 ring-acento/40 [transform:translateZ(2px)]"
+              >
+                <Star className="size-4 fill-acento text-acento" strokeWidth={1.5} />
+              </span>
             )}
           </motion.div>
         </Link>
@@ -252,7 +255,22 @@ const BookCard = forwardRef<HTMLLIElement, BookCardProps>(function BookCard(
 
       <div className="px-1 pt-3 text-center" style={{ height: captionHeight }}>
         <h3 className="line-clamp-2 font-display text-[15px] font-medium leading-snug">{book.title}</h3>
-        {book.author && <p className="mt-0.5 truncate text-xs text-tinta-suave/60">{book.author}</p>}
+        <p className="mt-0.5 flex items-center justify-center gap-1.5 truncate text-xs text-tinta-suave/60">
+          {book.author && <span className="truncate">{book.author}</span>}
+          {started && (
+            <span className="shrink-0 font-semibold tabular-nums text-acento">
+              {book.author && <span className="font-normal text-tinta-suave/40">· </span>}
+              {percent}%
+            </span>
+          )}
+          {finished && (
+            <span className="inline-flex shrink-0 items-center gap-1 font-semibold text-tinta-suave/80">
+              {book.author && <span className="font-normal text-tinta-suave/40">· </span>}
+              <Star className="size-3 fill-acento text-acento" strokeWidth={1.5} aria-hidden />
+              Terminado
+            </span>
+          )}
+        </p>
       </div>
     </motion.li>
   );

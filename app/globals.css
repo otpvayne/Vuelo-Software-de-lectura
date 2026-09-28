@@ -27,6 +27,13 @@
   /* Canto de las páginas */
   --canto: 250 243 228; /* #FAF3E4 */
   --canto-linea: 214 198 168; /* #D6C6A8 */
+  /* Papel "Suave": capa multiplicada + atenuación */
+  --papel-tinte: 252 242 222; /* #FCF2DE */
+  --papel-brillo: 0.98;
+  --papel-contraste: 0.97;
+  /* Velo para portadas casi blancas (en Día no hace falta) */
+  --velo: 255 255 255;
+  --velo-a: 0;
   color-scheme: light;
 }
 
@@ -48,6 +55,11 @@
   --lomo: 96 62 38; /* #603E26 */
   --canto: 244 232 206; /* #F4E8CE */
   --canto-linea: 204 182 142; /* #CCB68E */
+  --papel-tinte: 238 216 176; /* #EED8B0 */
+  --papel-brillo: 0.95;
+  --papel-contraste: 0.95;
+  --velo: 226 200 156; /* #E2C89C */
+  --velo-a: 0.75;
   color-scheme: light;
 }
 
@@ -69,6 +81,11 @@
   --lomo: 44 34 110; /* #2C226E */
   --canto: 226 214 190; /* #E2D6BE */
   --canto-linea: 170 156 132; /* #AA9C84 */
+  --papel-tinte: 228 210 182; /* #E4D2B6 */
+  --papel-brillo: 0.8;
+  --papel-contraste: 0.94;
+  --velo: 176 166 196; /* #B0A6C4 */
+  --velo-a: 0.85;
   color-scheme: dark;
 }
 
@@ -219,6 +236,48 @@
   .acciones-tarjeta[data-abierto] {
     opacity: 1;
   }
+}
+
+/* ── Papel del lector ─────────────────────────────────────────────
+ * Suave: tinte cálido multiplicado (el blanco toma el color, la tinta apenas cambia) y
+ * una atenuación leve. Invertido (solo noche): invert + hue-rotate conserva los tonos de
+ * las ilustraciones aproximadamente, y "lighten" con el fondo tiñe el negro de índigo. */
+.pagina-pdf::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 300ms ease;
+}
+.papel-suave .pagina-pdf canvas {
+  filter: brightness(var(--papel-brillo)) contrast(var(--papel-contraste));
+}
+.papel-suave .pagina-pdf::after {
+  background: rgb(var(--papel-tinte));
+  mix-blend-mode: multiply;
+  opacity: 1;
+}
+.papel-invertido .pagina-pdf canvas {
+  filter: invert(1) hue-rotate(180deg) brightness(0.9) contrast(0.92);
+}
+.papel-invertido .pagina-pdf::after {
+  background: rgb(var(--fondo));
+  mix-blend-mode: lighten;
+  opacity: 1;
+}
+.papel-invertido .pagina-pdf {
+  background: rgb(var(--fondo));
+}
+
+/* ── Portadas casi blancas (página 1 del PDF): velo en Sepia y Noche ── */
+.portada-clara::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: rgb(var(--velo) / var(--velo-a));
+  mix-blend-mode: multiply;
 }
 
 /* ── Cielo nocturno: solo en tema noche ──────────────────────────── */

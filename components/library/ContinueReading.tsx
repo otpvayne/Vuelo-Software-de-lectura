@@ -6,6 +6,7 @@ import { ArrowRight, Clock, Star } from 'lucide-react';
 import type { Book } from '@/lib/db';
 import { readerHref } from './BookCard';
 import GeneratedCover from './GeneratedCover';
+import { useLightCover } from './useCoverTone';
 
 const MIN_PER_PAGE = 2;
 
@@ -30,6 +31,7 @@ const COVER_W = 100;
 export default function ContinueReading({ book }: { book: Book }) {
   const reduce = useReducedMotion() ?? false;
   const percent = Math.round(book.progress * 100);
+  const lightCover = useLightCover(book.id, book.cover);
 
   return (
     <motion.section
@@ -54,7 +56,11 @@ export default function ContinueReading({ book }: { book: Book }) {
       />
 
       <div className="relative flex items-center gap-5 sm:gap-7">
-        <div className="aspect-[3/4] w-[84px] shrink-0 overflow-hidden rounded-l-[3px] rounded-r-[6px] bg-papel shadow-libro sm:w-[112px]">
+        <div
+          className={`relative aspect-[3/4] w-[84px] shrink-0 overflow-hidden rounded-l-[3px] rounded-r-[6px] bg-papel shadow-libro sm:w-[112px] ${
+            lightCover ? 'portada-clara' : ''
+          }`}
+        >
           {book.cover ? (
             // eslint-disable-next-line @next/next/no-img-element -- data URL local
             <img src={book.cover} alt="" className="size-full object-cover" draggable={false} />

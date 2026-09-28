@@ -48,7 +48,7 @@ export default function LibraryControls({ query, onQuery, sort, onSort }: Librar
 
   return (
     <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-      <label className="barra relative flex flex-1 items-center gap-2 rounded-suave px-3.5">
+      <label className="barra relative flex flex-1 items-center gap-2 rounded-suave px-3.5 focus-within:ring-2 focus-within:ring-acento focus-within:ring-offset-2 focus-within:ring-offset-fondo">
         <Search className="size-4 shrink-0 text-tinta-suave/50" strokeWidth={2} aria-hidden />
         <span className="sr-only">Buscar por título o autor</span>
         <input
@@ -56,7 +56,7 @@ export default function LibraryControls({ query, onQuery, sort, onSort }: Librar
           value={query}
           onChange={(e) => onQuery(e.target.value)}
           placeholder="Buscar por título o autor"
-          className="h-11 w-full bg-transparent text-sm outline-none placeholder:text-tinta-suave/45 [&::-webkit-search-cancel-button]:hidden"
+          className="h-11 w-full bg-transparent text-sm outline-none placeholder:text-tinta-suave/45 focus-visible:ring-0 focus-visible:ring-offset-0 [&::-webkit-search-cancel-button]:hidden"
         />
         {query && (
           <button
