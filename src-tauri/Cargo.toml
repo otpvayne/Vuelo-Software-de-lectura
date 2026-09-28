@@ -25,3 +25,7 @@ tauri = { version = "2", features = [] }
 tauri-plugin-log = "2"
 tauri-plugin-sql = { version = "2", features = ["sqlite"] }
 tauri-plugin-fs = "2"
+
+[lints.rust]
+# MSVC imprime "Creando biblioteca …dll.lib" al enlazar el cdylib; es informativo.
+linker_messages = "allow"

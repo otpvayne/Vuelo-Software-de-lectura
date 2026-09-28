@@ -22,7 +22,7 @@ Requisitos para Tauri en Windows: [Rust (rustup)](https://rustup.rs/) y
 | Script | Qué hace |
 | --- | --- |
 | `typecheck` | `tsc --noEmit` |
-| `reset-db` | Borra `vuelo.db` y los PDF importados del directorio de la app (`-- --keep-files` para conservar los PDF). En navegador: DevTools → Application → Clear site data. |
+| `reset-db` | Borra `vuelo.db` y los PDF importados. Flags: `--keep-files` (conserva los PDF), `--webview` (también tema/onboarding, solo Windows), `--dry-run`. En navegador: DevTools → Application → Clear site data. |
 
 ## Notas de arquitectura
 
@@ -32,3 +32,30 @@ Requisitos para Tauri en Windows: [Rust (rustup)](https://rustup.rs/) y
 - **pdfjs**: el worker se sirve desde `/pdf.worker.min.mjs` (mismo origen en dev, export y Tauri).
 - **Temas**: tokens en `app/globals.css` por `[data-theme]` (`dia`, `sepia`, `noche`). Prohibido HEX en JSX — lo impone ESLint.
 - **Íconos**: `npm run tauri icon ./assets/app-icon.png`. Fuentes SVG en `assets/`.
+
+## Datos en disco (Windows, verificado)
+
+| Qué | Dónde |
+| --- | --- |
+| Base SQLite (modo WAL) | `%APPDATA%\com.netrix.vuelo\vuelo.db` |
+| PDF importados | `%APPDATA%\com.netrix.vuelo\books\<id>.pdf` |
+| localStorage del webview (tema, onboarding) | `%LOCALAPPDATA%\com.netrix.vuelo\EBWebView` |
+| App instalada (NSIS, por usuario) | `%LOCALAPPDATA%\Vuelo` |
+
+El localStorage depende del origen: en `tauri dev` es `http://localhost:3000` y en el build `http://tauri.localhost`, así que tema y onboarding no se comparten entre ambos.
+
+## Seguridad (CSP)
+
+Definida en `src-tauri/tauri.conf.json`. Tauri añade automáticamente los hashes sha256 de los `<script>` inline del export de Next.
+Solo se aplica en el build empaquetado; en `tauri dev` la página la sirve el dev server de Next.
+
+- `script-src 'self'` · sin `'unsafe-eval'` (pdfjs v6 no usa eval; sin `wasmUrl` no carga wasm).
+- `worker-src 'self'` · el worker de pdfjs se sirve desde el propio bundle.
+- `img-src 'self' data:` · portadas guardadas como data URL.
+- `style-src 'self' 'unsafe-inline'` · motion inyecta `<style>` en `AnimatePresence mode="popLayout"`.
+- `connect-src 'self' ipc: http://ipc.localhost` · IPC de Tauri. Nada externo.
+- `object-src`, `base-uri`, `form-action`, `frame-ancestors`: `'none'`.
+
+## Instalador sin firmar
+
+Los `.exe` no están firmados. Con Smart App Control / Control de aplicaciones de Windows activo, un instalador recién compilado puede quedar bloqueado. Para distribuir, firma el binario (`bundle.windows.certificateThumbprint` o `signCommand`).

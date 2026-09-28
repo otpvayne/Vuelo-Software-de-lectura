@@ -30,6 +30,12 @@ export default function LibraryPage() {
     void load();
   }, [load]);
 
+  const removeBook = useCallback(async (book: Book) => {
+    const store = await getStore();
+    await store.deleteBook(book.id);
+    setBooks((prev) => prev?.filter((b) => b.id !== book.id) ?? null);
+  }, []);
+
   const lastRead = books?.find((b) => b.lastOpenedAt !== null && b.progress < 1);
   const hasBooks = !!books && books.length > 0;
 
@@ -54,7 +60,7 @@ export default function LibraryPage() {
         {books === null ? null : hasBooks ? (
           <>
             {lastRead && <ContinueReading book={lastRead} />}
-            <Shelf books={books} />
+            <Shelf books={books} onDelete={removeBook} />
           </>
         ) : (
           <EmptyState action={<AddBookButton onAdded={() => void load()} />} />

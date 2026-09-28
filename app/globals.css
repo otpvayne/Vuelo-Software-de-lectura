@@ -43,6 +43,8 @@
 @layer base {
   html {
     @apply bg-fondo text-tinta antialiased;
+    scrollbar-width: thin;
+    scrollbar-color: rgb(var(--linea) / 0.25) transparent;
   }
   body {
     @apply min-h-dvh bg-fondo font-sans text-tinta;
@@ -64,6 +66,19 @@
   /* Barras flotantes con blur */
   .barra {
     @apply border border-linea/10 bg-fondo/70 shadow-suave backdrop-blur-xl backdrop-saturate-150;
+  }
+}
+
+/* Acciones de la tarjeta: siempre visibles en táctil; con ratón, al pasar por encima o con foco. */
+@media (hover: hover) {
+  .acciones-tarjeta {
+    opacity: 0;
+    transition: opacity 200ms ease;
+  }
+  .group:hover .acciones-tarjeta,
+  .acciones-tarjeta:focus-within,
+  .acciones-tarjeta[data-abierto] {
+    opacity: 1;
   }
 }
 
