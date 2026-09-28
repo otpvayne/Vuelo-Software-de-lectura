@@ -16,6 +16,8 @@ export interface Book {
   author: string | null;
   /** Tauri: ruta relativa a AppData. Navegador: clave en el store `files`. */
   filePath: string;
+  /** Nombre original del archivo importado (para detectar duplicados). null en libros previos a la migración 2. */
+  fileName: string | null;
   pageCount: number;
   currentPage: number;
   /** 0-1 */
@@ -61,7 +63,7 @@ export interface Bookmark {
   createdAt: number;
 }
 
-export type NewBook = Pick<Book, 'title' | 'author' | 'pageCount' | 'cover'>;
+export type NewBook = Pick<Book, 'title' | 'author' | 'pageCount' | 'cover' | 'fileName'>;
 export type NewHighlight = Omit<Highlight, 'id' | 'createdAt'>;
 
 export interface VueloStore {
@@ -70,7 +72,12 @@ export interface VueloStore {
   /** Guarda el archivo PDF y crea el registro del libro. */
   addBook(data: NewBook, file: Uint8Array): Promise<Book>;
   readBookFile(book: Book): Promise<Uint8Array>;
-  updateReading(id: string, currentPage: number): Promise<void>;
+  /**
+   * Guarda la posición y marca el libro como abierto. `readTo` es la última página
+   * visible (en doble página, la derecha) y define el progreso; si se omite, el
+   * progreso no cambia (p. ej. al solo abrir el libro).
+   */
+  updateReading(id: string, currentPage: number, readTo?: number): Promise<void>;
   deleteBook(id: string): Promise<void>;
 
   listNotes(bookId: string): Promise<Note[]>;
@@ -151,6 +158,9 @@ export const MIGRATIONS: readonly string[] = [
     UNIQUE (book_id, page)
   );
   `,
+  /* 2 — nombre original del archivo, para avisar de duplicados */ `
+  ALTER TABLE books ADD COLUMN file_name TEXT;
+  `,
 ];
 
 // ────────────────────────────── SQLite ─────────────────────────────
@@ -166,6 +176,7 @@ interface BookRow {
   cover: string | null;
   added_at: number;
   last_opened_at: number | null;
+  file_name: string | null;
 }
 interface NoteRow {
   id: string;
@@ -204,6 +215,7 @@ const toBook = (r: BookRow): Book => ({
   cover: r.cover,
   addedAt: r.added_at,
   lastOpenedAt: r.last_opened_at,
+  fileName: r.file_name,
 });
 const toNote = (r: NoteRow): Note => ({
   id: r.id,
@@ -276,23 +288,31 @@ async function createSqliteStore(): Promise<VueloStore> {
         lastOpenedAt: null,
       };
       await db.execute(
-        `INSERT INTO books (id, title, author, file_path, page_count, current_page, progress, cover, added_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-        [id, book.title, book.author, filePath, book.pageCount, 1, 0, book.cover, book.addedAt],
+        `INSERT INTO books (id, title, author, file_path, page_count, current_page, progress, cover, added_at, file_name)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [id, book.title, book.author, filePath, book.pageCount, 1, 0, book.cover, book.addedAt, book.fileName],
       );
       return book;
     },
     async readBookFile(book) {
       return fs.readFile(book.filePath, base);
     },
-    async updateReading(id, currentPage) {
+    async updateReading(id, currentPage, readTo) {
+      if (readTo === undefined) {
+        await db.execute('UPDATE books SET current_page = $2, last_opened_at = $3 WHERE id = $1', [
+          id,
+          currentPage,
+          now(),
+        ]);
+        return;
+      }
       await db.execute(
         `UPDATE books
          SET current_page = $2,
-             progress = CASE WHEN page_count > 0 THEN MIN(1.0, MAX(0.0, CAST($2 AS REAL) / page_count)) ELSE 0 END,
+             progress = CASE WHEN page_count > 0 THEN MIN(1.0, MAX(0.0, CAST($4 AS REAL) / page_count)) ELSE 0 END,
              last_opened_at = $3
          WHERE id = $1`,
-        [id, currentPage, now()],
+        [id, currentPage, now(), readTo],
       );
     },
     async deleteBook(id) {
@@ -378,6 +398,9 @@ interface VueloIdb extends DBSchema {
   bookmarks: { key: string; value: Bookmark; indexes: { bookId: string; bookPage: [string, number] } };
 }
 
+/** Registros guardados antes de la versión 2 no tienen `fileName`. */
+const withDefaults = (book: Book): Book => ({ ...book, fileName: book.fileName ?? null });
+
 const byPage = <T extends { page: number; createdAt: number }>(a: T, b: T) =>
   a.page - b.page || a.createdAt - b.createdAt;
 
@@ -386,6 +409,7 @@ async function createIdbStore(): Promise<VueloStore> {
   // La versión de IndexedDB sigue a MIGRATIONS para mantener ambos backends alineados.
   const db: IDBPDatabase<VueloIdb> = await openDB<VueloIdb>(IDB_NAME, MIGRATIONS.length, {
     upgrade(database, oldVersion) {
+      // v2 solo añade el campo opcional `fileName`: no cambia la estructura de los stores.
       if (oldVersion < 1) {
         database.createObjectStore('books', { keyPath: 'id' });
         database.createObjectStore('files');
@@ -400,11 +424,12 @@ async function createIdbStore(): Promise<VueloStore> {
 
   return {
     async listBooks() {
-      const books = await db.getAll('books');
+      const books = (await db.getAll('books')).map(withDefaults);
       return books.sort((a, b) => (b.lastOpenedAt ?? b.addedAt) - (a.lastOpenedAt ?? a.addedAt));
     },
     async getBook(id) {
-      return (await db.get('books', id)) ?? null;
+      const book = await db.get('books', id);
+      return book ? withDefaults(book) : null;
     },
     async addBook(data, file) {
       const id = uid();
@@ -430,13 +455,13 @@ async function createIdbStore(): Promise<VueloStore> {
       if (!blob) throw new Error(`No se encontró el archivo de "${book.title}"`);
       return new Uint8Array(await blob.arrayBuffer());
     },
-    async updateReading(id, currentPage) {
+    async updateReading(id, currentPage, readTo) {
       const book = await db.get('books', id);
       if (!book) return;
       await db.put('books', {
         ...book,
         currentPage,
-        progress: progressOf(currentPage, book.pageCount),
+        progress: readTo === undefined ? book.progress : progressOf(readTo, book.pageCount),
         lastOpenedAt: now(),
       });
     },

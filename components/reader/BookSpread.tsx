@@ -20,7 +20,8 @@ interface BookSpreadProps {
   /** 1-based */
   startPage: number;
   highlights: Highlight[];
-  onPageChange(page: number): void;
+  /** `page`: página izquierda/actual. `readTo`: última página visible (define el progreso). */
+  onPageChange(page: number, readTo: number): void;
 }
 
 /** Cuántas páginas alrededor de la actual se rasterizan. */
@@ -30,6 +31,7 @@ interface PageFlipApi {
   flipNext(): void;
   flipPrev(): void;
   flip(page: number): void;
+  getOrientation(): 'portrait' | 'landscape';
 }
 
 const BookSpread = forwardRef<BookSpreadHandle, BookSpreadProps>(function BookSpread(
@@ -68,6 +70,10 @@ const BookSpread = forwardRef<BookSpreadHandle, BookSpreadProps>(function BookSp
     return { w, h: Math.floor(w * aspect) };
   }, [box, aspect]);
 
+  // En doble página también se ve la página derecha: cuenta como leída.
+  const report = (page: number, mode: 'portrait' | 'landscape') =>
+    onPageChange(page, mode === 'landscape' ? Math.min(page + 1, doc.numPages) : page);
+
   const pages = useMemo(() => Array.from({ length: doc.numPages }, (_, i) => i + 1), [doc]);
   const byPage = useMemo(() => {
     const map = new Map<number, Highlight[]>();
@@ -105,10 +111,13 @@ const BookSpread = forwardRef<BookSpreadHandle, BookSpreadProps>(function BookSp
           swipeDistance={30}
           showPageCorners
           disableFlipByClick={false}
+          onInit={(e: { data: { page: number; mode: 'portrait' | 'landscape' } }) => {
+            report(e.data.page + 1, e.data.mode);
+          }}
           onFlip={(e: { data: number }) => {
             const page = e.data + 1;
             setCurrent(page);
-            onPageChange(page);
+            report(page, flipRef.current?.pageFlip()?.getOrientation() ?? 'portrait');
           }}
         >
           {pages.map((n) => (

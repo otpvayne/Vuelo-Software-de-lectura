@@ -1,34 +1,60 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
-import { Feather } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import AddBookButton from '@/components/library/AddBookButton';
-import ContinueReading from '@/components/library/ContinueReading';
+import ContinueReading, { pickContinue } from '@/components/library/ContinueReading';
+import DropOverlay from '@/components/library/DropOverlay';
+import ImportStatus from '@/components/library/ImportStatus';
+import LibraryControls, {
+  CONTROLS_MIN_BOOKS,
+  filterAndSort,
+  type SortKey,
+} from '@/components/library/LibraryControls';
 import Shelf from '@/components/library/Shelf';
+import { useBookImport } from '@/components/library/useBookImport';
 import EmptyState from '@/components/ui/EmptyState';
+import NightSky from '@/components/ui/NightSky';
 import Onboarding from '@/components/ui/Onboarding';
 import ThemeToggle from '@/components/ui/ThemeToggle';
 import { APP_NAME, TAGLINE } from '@/lib/constants';
 import { getStore, type Book } from '@/lib/db';
 
+/** Cuánto dura la animación de "entrar a la repisa" de un libro nuevo. */
+const NEW_BOOK_MS = 1600;
+
 export default function LibraryPage() {
+  const reduce = useReducedMotion() ?? false;
   const [books, setBooks] = useState<Book[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    try {
-      const store = await getStore();
-      setBooks(await store.listBooks());
-    } catch (err) {
-      console.error(err);
-      setError('No pudimos abrir tu biblioteca.');
-      setBooks([]);
-    }
-  }, []);
+  const [query, setQuery] = useState('');
+  const [sort, setSort] = useState<SortKey>('recientes');
+  const [newIds, setNewIds] = useState<ReadonlySet<string>>(new Set());
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    getStore()
+      .then((store) => store.listBooks())
+      .then(setBooks)
+      .catch((err: unknown) => {
+        console.error(err);
+        setError('No pudimos abrir tu biblioteca.');
+        setBooks([]);
+      });
+  }, []);
+
+  const onAdded = useCallback((book: Book) => {
+    setBooks((prev) => [book, ...(prev ?? [])]);
+    setNewIds((prev) => new Set(prev).add(book.id));
+    setTimeout(() => {
+      setNewIds((prev) => {
+        const next = new Set(prev);
+        next.delete(book.id);
+        return next;
+      });
+    }, NEW_BOOK_MS);
+  }, []);
+
+  const importer = useBookImport(onAdded);
 
   const removeBook = useCallback(async (book: Book) => {
     const store = await getStore();
@@ -36,37 +62,69 @@ export default function LibraryPage() {
     setBooks((prev) => prev?.filter((b) => b.id !== book.id) ?? null);
   }, []);
 
-  const lastRead = books?.find((b) => b.lastOpenedAt !== null && b.progress < 1);
   const hasBooks = !!books && books.length > 0;
+  const showControls = !!books && books.length >= CONTROLS_MIN_BOOKS;
+  const continueBook = useMemo(() => (books ? pickContinue(books) : null), [books]);
+  const visible = useMemo(
+    () => (books ? filterAndSort(books, showControls ? query : '', showControls ? sort : 'recientes') : []),
+    [books, query, sort, showControls],
+  );
 
   return (
-    <div className="min-h-dvh">
-      <header className="barra sticky top-3 z-30 mx-3 mt-3 flex items-center gap-3 rounded-panel px-4 py-2 sm:mx-6">
-        <Feather className="size-6 text-acento" strokeWidth={1.8} aria-hidden />
+    <div className="relative min-h-dvh">
+      <NightSky />
+
+      <header className="barra sticky top-3 z-30 mx-3 mt-3 flex items-center gap-3 rounded-panel px-3 py-2 sm:mx-6 sm:px-4">
+        {/* eslint-disable-next-line @next/next/no-img-element -- ícono local del bundle */}
+        <img src="/vuelo-icon.png" alt="" width={40} height={40} className="size-10 rounded-[11px] shadow-suave" />
         <div className="min-w-0 flex-1">
-          <p className="font-display text-xl font-semibold leading-none">{APP_NAME}</p>
-          <p className="hidden truncate text-xs text-tinta-suave/60 sm:block">{TAGLINE}</p>
+          <h1 className="font-display text-xl font-semibold leading-none">{APP_NAME}</h1>
+          <p className="mt-1 truncate text-xs text-tinta-suave/60">{TAGLINE}</p>
         </div>
-        {hasBooks && <AddBookButton variant="compact" onAdded={() => void load()} />}
+        {hasBooks && <AddBookButton variant="compact" onFiles={importer.importFiles} busy={importer.busy} />}
         <ThemeToggle />
       </header>
 
-      <main className="mx-auto max-w-6xl space-y-12 px-4 pb-16 pt-10 sm:px-8">
+      <main className="relative z-10 mx-auto max-w-[1344px] space-y-10 px-4 pb-24 pt-8 sm:px-8 sm:pt-10">
         {error && (
           <p role="alert" className="rounded-suave bg-papel p-4 text-sm">
             {error}
           </p>
         )}
+
         {books === null ? null : hasBooks ? (
           <>
-            {lastRead && <ContinueReading book={lastRead} />}
-            <Shelf books={books} onDelete={removeBook} />
+            <AnimatePresence initial={false}>
+              {continueBook && (
+                <motion.div
+                  key="continuar"
+                  exit={reduce ? { opacity: 0 } : { opacity: 0, height: 0, marginTop: 0 }}
+                  transition={{ duration: 0.3 }}
+                >
+                  <ContinueReading book={continueBook} />
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {showControls && <LibraryControls query={query} onQuery={setQuery} sort={sort} onSort={setSort} />}
+
+            {visible.length > 0 ? (
+              <Shelf books={visible} newIds={newIds} onDelete={removeBook} />
+            ) : (
+              <p className="py-16 text-center text-tinta-suave/70">
+                Ningún libro coincide con “{query.trim()}”.
+              </p>
+            )}
           </>
         ) : (
-          <EmptyState action={<AddBookButton onAdded={() => void load()} />} />
+          <EmptyState
+            action={<AddBookButton onFiles={importer.importFiles} busy={importer.busy} />}
+          />
         )}
       </main>
 
+      <DropOverlay onFiles={importer.importFiles} />
+      <ImportStatus progress={importer.progress} notices={importer.notices} onDismiss={importer.dismiss} />
       <Onboarding />
     </div>
   );

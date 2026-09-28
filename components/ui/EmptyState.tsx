@@ -1,8 +1,8 @@
 'use client';
 
 import type { ReactNode } from 'react';
-import { motion } from 'motion/react';
-import { BookOpen, Sparkles } from 'lucide-react';
+import { motion, useReducedMotion } from 'motion/react';
+import WingedBook from './WingedBook';
 
 interface EmptyStateProps {
   title?: string;
@@ -10,33 +10,43 @@ interface EmptyStateProps {
   action?: ReactNode;
 }
 
+/** Repisa vacía con un libro alado flotando sobre ella. */
 export default function EmptyState({
   title = 'Tu primera aventura empieza aquí',
-  description = 'Añade un PDF y conviértelo en un libro que se hojea página a página.',
+  description = 'Añade un PDF —o arrástralo a la ventana— y conviértelo en un libro que se hojea página a página.',
   action,
 }: EmptyStateProps) {
+  const reduce = useReducedMotion() ?? false;
+
   return (
     <motion.section
-      initial={{ opacity: 0, y: 16 }}
+      initial={reduce ? false : { opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-      className="mx-auto flex max-w-md flex-col items-center px-6 py-16 text-center"
+      className="mx-auto flex max-w-lg flex-col items-center px-4 py-10 text-center sm:py-16"
     >
-      <div className="relative mb-8">
-        <motion.div
-          animate={{ y: [0, -8, 0], rotate: [-2, 2, -2] }}
-          transition={{ duration: 6, repeat: Infinity, ease: 'easeInOut' }}
-          className="grid size-28 place-items-center rounded-panel bg-papel shadow-libro"
-        >
-          <BookOpen className="size-12 text-tinta" strokeWidth={1.4} />
-        </motion.div>
-        <motion.span
-          animate={{ scale: [1, 1.15, 1], opacity: [0.7, 1, 0.7] }}
-          transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
-          className="absolute -right-3 -top-3 grid size-9 place-items-center rounded-full bg-acento text-tinta shadow-suave dark:text-fondo"
-        >
-          <Sparkles className="size-4" strokeWidth={2} />
-        </motion.span>
+      <div className="relative mb-12 w-full max-w-sm">
+        <div className="relative flex h-44 items-end justify-center">
+          {/* Sombra en la repisa, se encoge cuando el libro sube */}
+          <motion.span
+            aria-hidden
+            className="absolute bottom-1 h-3 w-24 rounded-[50%] bg-sombra/35 blur-[6px]"
+            animate={reduce ? undefined : { scaleX: [1, 0.72, 1], opacity: [0.9, 0.5, 0.9] }}
+            transition={{ duration: 5, repeat: Infinity, ease: 'easeInOut' }}
+          />
+          <motion.div
+            className="mb-8"
+            animate={reduce ? undefined : { y: [0, -16, 0], rotate: [-2.5, 2.5, -2.5] }}
+            transition={{ duration: 5, repeat: Infinity, ease: 'easeInOut' }}
+          >
+            <WingedBook
+              className="w-44 text-papel drop-shadow-[0_10px_18px_rgb(var(--sombra)/0.25)]"
+              accentClassName="text-acento"
+              outlineClassName="text-tinta/35"
+            />
+          </motion.div>
+        </div>
+        <div aria-hidden className="repisa relative -mx-2 h-5" />
       </div>
 
       <h2 className="text-balance text-3xl font-semibold sm:text-4xl">{title}</h2>

@@ -15,6 +15,18 @@
   --tinta-suave: 43 35 64;
   --linea: 43 35 64;
   --sombra: 43 35 64;
+
+  /* Madera clara (arce) */
+  --madera-luz: 238 214 172; /* #EED6AC */
+  --madera: 216 178 126; /* #D8B27E */
+  --madera-sombra: 170 128 80; /* #AA8050 */
+  --repisa-luz: 0.12; /* halo cálido sobre la repisa */
+  --repisa-brillo: 0; /* resplandor ámbar (solo noche) */
+  /* Lomo por defecto para libros con portada real */
+  --lomo: 60 48 98; /* #3C3062 */
+  /* Canto de las páginas */
+  --canto: 250 243 228; /* #FAF3E4 */
+  --canto-linea: 214 198 168; /* #D6C6A8 */
   color-scheme: light;
 }
 
@@ -26,6 +38,16 @@
   --tinta-suave: 74 54 38;
   --linea: 74 54 38;
   --sombra: 74 54 38;
+
+  /* Madera cálida (cerezo) */
+  --madera-luz: 205 146 92; /* #CD925C */
+  --madera: 170 108 60; /* #AA6C3C */
+  --madera-sombra: 118 70 36; /* #764624 */
+  --repisa-luz: 0.16;
+  --repisa-brillo: 0;
+  --lomo: 96 62 38; /* #603E26 */
+  --canto: 244 232 206; /* #F4E8CE */
+  --canto-linea: 204 182 142; /* #CCB68E */
   color-scheme: light;
 }
 
@@ -37,7 +59,35 @@
   --tinta-suave: 246 234 210;
   --linea: 246 234 210;
   --sombra: 0 0 0;
+
+  /* Madera oscura (nogal) con leve resplandor ámbar */
+  --madera-luz: 98 70 58; /* #62463A */
+  --madera: 64 44 38; /* #402C26 */
+  --madera-sombra: 34 22 22; /* #221616 */
+  --repisa-luz: 0.2;
+  --repisa-brillo: 0.28;
+  --lomo: 44 34 110; /* #2C226E */
+  --canto: 226 214 190; /* #E2D6BE */
+  --canto-linea: 170 156 132; /* #AA9C84 */
   color-scheme: dark;
+}
+
+/*
+ * Paletas de portadas generadas (libros sin portada extraíble). Iguales en todos los temas:
+ * son "objetos" de la estantería. --pa/--pb: degradado · --pt: tinta de la portada.
+ */
+.portada-0 { --pa: 58 44 140; --pb: 20 14 66; --pt: 246 234 210; } /* #3A2C8C #140E42 índigo */
+.portada-1 { --pa: 255 190 102; --pb: 214 122 48; --pt: 43 35 64; } /* #FFBE66 #D67A30 ámbar */
+.portada-2 { --pa: 128 166 138; --pb: 52 98 78; --pt: 250 243 228; } /* #80A68A #34624E salvia */
+.portada-3 { --pa: 232 150 146; --pb: 150 70 92; --pt: 255 247 240; } /* #E89692 #96465C rosa */
+.portada-4 { --pa: 132 180 222; --pb: 52 92 150; --pt: 255 251 243; } /* #84B4DE #345C96 cielo */
+.portada-5 { --pa: 236 214 170; --pb: 180 138 92; --pt: 74 54 38; } /* #ECD6AA #B48A5C pergamino */
+
+:root {
+  /* Veta de madera: ruido fractal estirado en horizontal (SVG inline, sin descargas). */
+  --ruido-madera: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='320' height='48'%3E%3Cfilter id='v'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.006 0.42' numOctaves='3' seed='11'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.55 -0.12'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23v)'/%3E%3C/svg%3E");
+  /* Grano de papel */
+  --ruido-papel: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='p'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' seed='3'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.09 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23p)'/%3E%3C/svg%3E");
 }
 
 @layer base {
@@ -67,6 +117,95 @@
   .barra {
     @apply border border-linea/10 bg-fondo/70 shadow-suave backdrop-blur-xl backdrop-saturate-150;
   }
+
+  /* ── Repisa de madera ─────────────────────────────────────────── */
+  .repisa {
+    border-radius: 5px 5px 7px 7px;
+    background-image: var(--ruido-madera),
+      linear-gradient(
+        to bottom,
+        rgb(var(--madera-luz)) 0%,
+        rgb(var(--madera-luz)) 34%,
+        rgb(var(--madera)) 40%,
+        rgb(var(--madera-sombra)) 100%
+      );
+    background-size: 320px 100%, 100% 100%;
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.35),
+      inset 0 -2px 0 rgb(0 0 0 / 0.14),
+      0 1px 1px rgb(var(--sombra) / 0.2),
+      0 8px 14px -6px rgb(var(--sombra) / 0.35),
+      0 22px 30px -16px rgb(var(--sombra) / 0.4),
+      0 -4px 26px -6px rgb(var(--acento) / var(--repisa-brillo));
+  }
+  /* Luz suave sobre la repisa (en la pared) */
+  .repisa::before {
+    content: '';
+    position: absolute;
+    left: 8%;
+    right: 8%;
+    bottom: 100%;
+    height: 72px;
+    pointer-events: none;
+    background: radial-gradient(ellipse at 50% 100%, rgb(var(--acento) / var(--repisa-luz)), transparent 70%);
+  }
+  /* Ménsulas */
+  .repisa::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 6%;
+    right: 6%;
+    height: 10px;
+    pointer-events: none;
+    background:
+      linear-gradient(to bottom, rgb(var(--madera-sombra)), transparent) left / 10px 100% no-repeat,
+      linear-gradient(to bottom, rgb(var(--madera-sombra)), transparent) right / 10px 100% no-repeat;
+    opacity: 0.8;
+  }
+
+  /* ── Libro 3D ─────────────────────────────────────────────────── */
+  .libro-lomo {
+    background:
+      linear-gradient(
+        to right,
+        rgb(0 0 0 / 0.28),
+        rgb(255 255 255 / 0.1) 30%,
+        rgb(0 0 0 / 0) 55%,
+        rgb(0 0 0 / 0.25)
+      ),
+      rgb(var(--lomo));
+  }
+  .portada-generada .libro-lomo,
+  .libro-lomo.portada-generada {
+    background:
+      linear-gradient(to right, rgb(0 0 0 / 0.28), rgb(255 255 255 / 0.12) 30%, rgb(0 0 0 / 0) 55%, rgb(0 0 0 / 0.25)),
+      rgb(var(--pb));
+  }
+  .libro-canto {
+    background:
+      linear-gradient(to bottom, rgb(0 0 0 / 0.08), transparent 12%, transparent 88%, rgb(0 0 0 / 0.1)),
+      repeating-linear-gradient(to right, rgb(var(--canto)) 0 1.5px, rgb(var(--canto-linea)) 1.5px 2px);
+  }
+  /* Pliegue del lomo y brillo satinado sobre la portada */
+  .libro-brillo {
+    background:
+      linear-gradient(
+        to right,
+        rgb(0 0 0 / 0.22) 0,
+        rgb(255 255 255 / 0.16) 2.5%,
+        rgb(0 0 0 / 0.1) 5%,
+        transparent 9%
+      ),
+      linear-gradient(115deg, rgb(255 255 255 / 0.14), transparent 40%);
+  }
+  .grano-papel {
+    background-image: var(--ruido-papel);
+  }
+  /* Cinta marcapáginas con muesca */
+  .cinta {
+    clip-path: polygon(0 0, 100% 0, 100% 100%, 50% calc(100% - 7px), 0 100%);
+  }
 }
 
 /* Acciones de la tarjeta: siempre visibles en táctil; con ratón, al pasar por encima o con foco. */
@@ -79,6 +218,33 @@
   .acciones-tarjeta:focus-within,
   .acciones-tarjeta[data-abierto] {
     opacity: 1;
+  }
+}
+
+/* ── Cielo nocturno: solo en tema noche ──────────────────────────── */
+.cielo {
+  display: none;
+}
+[data-theme='noche'] .cielo {
+  display: block;
+}
+.cielo span {
+  position: absolute;
+  border-radius: 9999px;
+  background: rgb(var(--tinta) / 0.8);
+  opacity: 0.25;
+  will-change: opacity;
+}
+.cielo.titila span {
+  animation: titilar var(--d, 5s) ease-in-out var(--r, 0s) infinite;
+}
+@keyframes titilar {
+  0%,
+  100% {
+    opacity: 0.12;
+  }
+  50% {
+    opacity: 0.75;
   }
 }
 
@@ -96,5 +262,8 @@ html.tema-en-transicion *::after {
   html.tema-en-transicion,
   html.tema-en-transicion * {
     transition: none !important;
+  }
+  .cielo.titila span {
+    animation: none;
   }
 }

@@ -27,6 +27,7 @@ function Reader() {
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [failed, setFailed] = useState(false);
   const [page, setPage] = useState(1);
+  const [readTo, setReadTo] = useState<number | null>(null);
   const [notes, setNotes] = useState<Note[]>([]);
   const [highlights, setHighlights] = useState<Highlight[]>([]);
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
@@ -72,10 +73,10 @@ function Reader() {
   useEffect(() => {
     if (!loaded) return;
     const t = setTimeout(() => {
-      void getStore().then((s) => s.updateReading(loaded.book.id, page));
+      void getStore().then((s) => s.updateReading(loaded.book.id, page, readTo ?? undefined));
     }, 400);
     return () => clearTimeout(t);
-  }, [loaded, page]);
+  }, [loaded, page, readTo]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -135,7 +136,10 @@ function Reader() {
           aspect={aspect}
           startPage={book.currentPage}
           highlights={highlights}
-          onPageChange={setPage}
+          onPageChange={(p, r) => {
+            setPage(p);
+            setReadTo(r);
+          }}
         />
       </main>
 

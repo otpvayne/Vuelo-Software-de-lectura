@@ -27,6 +27,8 @@ Requisitos para Tauri en Windows: [Rust (rustup)](https://rustup.rs/) y
 ## Notas de arquitectura
 
 - **Persistencia** (`lib/db.ts`): misma interfaz `VueloStore` con dos backends. SQLite si `isTauri()`, IndexedDB si no. Las migraciones son un array `MIGRATIONS` versionado con `PRAGMA user_version` (e igual versión en IndexedDB). No edites una migración publicada: añade otra.
+- **Importar libros**: botón (varios PDF) o arrastrar y soltar sobre la ventana. Se usan eventos HTML5 con `dragDropEnabled: false` en la ventana de Tauri: WebView2 entrega los `File` y no hace falta dar a `fs` acceso a rutas del usuario. Duplicado = mismo nombre de archivo (migración 2, `file_name`) y mismo número de páginas.
+- **Progreso**: se calcula con la última página visible (en doble página, la derecha), así un libro puede llegar al 100 %.
 - **Subrayados**: `rects` se guardan como proporciones 0-1 de la página, independientes del zoom.
 - **Visor**: la ruta es `/lector/?id=<uuid>`. Con `output: 'export'` no hay rutas dinámicas en runtime (los id viven en la base local), por eso no se usa `lector/[id]`.
 - **pdfjs**: el worker se sirve desde `/pdf.worker.min.mjs` (mismo origen en dev, export y Tauri).
