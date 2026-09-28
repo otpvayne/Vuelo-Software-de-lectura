@@ -10,6 +10,7 @@ import { useSearchParams } from 'next/navigation';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { useReducedMotion } from 'motion/react';
 import { Loader2 } from 'lucide-react';
+import FinishCelebration from '@/components/reader/FinishCelebration';
 import GestureHint from '@/components/reader/GestureHint';
 import HighlightMenu from '@/components/reader/HighlightMenu';
 import HighlighterPalette from '@/components/reader/HighlighterPalette';
@@ -25,7 +26,10 @@ import { copyText } from '@/lib/clipboard';
 import { HIGHLIGHT_META, type HighlightColor, type Theme } from '@/lib/constants';
 import { getStore, type Book, type Bookmark, type Highlight, type HighlightPatch, type Note } from '@/lib/db';
 import type { PageSelection } from '@/lib/highlightGeometry';
+import { markCelebrated, wasCelebrated } from '@/lib/goals';
 import { HighlightBook } from '@/lib/highlightStore';
+import { getChapters, type Chapter } from '@/lib/outline';
+import { ReadingSessionTracker } from '@/lib/readingSessions';
 import { PageCache, ReaderSignal } from '@/lib/pageCache';
 import { playPageTurn, unlockPageSound } from '@/lib/pageSound';
 import { closePdf, openPdf } from '@/lib/pdf';
@@ -64,7 +68,18 @@ const isTyping = (t: EventTarget | null) =>
   t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || (t instanceof HTMLElement && t.isContentEditable);
 
 function Reader() {
-  const id = useSearchParams().get('id');
+  const params = useSearchParams();
+  const id = params.get('id');
+  /** Página pedida desde el Cuaderno (?p=N). Abrir ahí no cambia el progreso. */
+  const requestedPage = Number(params.get('p'));
+  const [chapters, setChapters] = useState<Chapter[]>([]);
+  const [celebrate, setCelebrate] = useState(false);
+  const trackerRef = useRef<ReadingSessionTracker | null>(null);
+  /** Progreso al abrir: el festejo solo sale si el libro no estaba ya terminado. */
+  const initialProgress = useRef(0);
+  const numPagesRef = useRef(0);
+  /** El primer informe del flip fija la página de partida real (no cuenta como navegar). */
+  const baselineSet = useRef(false);
   const reduce = useReducedMotion() ?? false;
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [failed, setFailed] = useState(false);
@@ -100,6 +115,7 @@ function Reader() {
 
   // ── Carga ──
   useEffect(() => {
+    baselineSet.current = false;
     if (!id) {
       setFailed(true);
       return;
@@ -122,13 +138,21 @@ function Reader() {
         store.updateReading(id, book.currentPage),
       ]);
       if (cancelled) return;
+      const start =
+        Number.isInteger(requestedPage) && requestedPage >= 1 && requestedPage <= doc.numPages
+          ? requestedPage
+          : book.currentPage;
       const signal = new ReaderSignal();
-      signal.set({ current: book.currentPage });
-      startPage.current = book.currentPage;
+      signal.set({ current: start });
+      startPage.current = start;
+      initialProgress.current = book.progress;
+      numPagesRef.current = doc.numPages;
       setNotes(n);
       setBookmarks(b);
-      setPage(book.currentPage);
-      setReadTo(book.currentPage);
+      setPage(start);
+      setReadTo(start);
+      // Índice del PDF (si lo trae) para las paradas del camino; no bloquea la apertura.
+      void getChapters(doc).then((c) => !cancelled && setChapters(c));
       const highlights = new HighlightBook(h);
       setLoaded({ book, doc, cache, signal, highlights, aspect: first.height / first.width });
       if (process.env.NODE_ENV !== 'production') {
@@ -143,7 +167,26 @@ function Reader() {
       cache?.destroy();
       if (doc) void closePdf(doc);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  // ── Sesión de lectura: empieza al abrir y termina al salir (quita sus listeners) ──
+  useEffect(() => {
+    if (!loaded) return;
+    const tracker = new ReadingSessionTracker(loaded.book.id, startPage.current, (s) =>
+      getStore().then((store) => store.saveSession(s)),
+    );
+    tracker.start();
+    trackerRef.current = tracker;
+    if (process.env.NODE_ENV !== 'production') {
+      const w = window as unknown as { __vuelo?: Record<string, unknown> };
+      if (w.__vuelo) w.__vuelo.session = tracker;
+    }
+    return () => {
+      trackerRef.current = null;
+      void tracker.stop();
+    };
+  }, [loaded]);
 
   // ── Preferencias: tema → papel; sonido ──
   useEffect(() => {
@@ -279,11 +322,32 @@ function Reader() {
     if (soundRef.current) playPageTurn();
   }, []);
 
-  const onPageChange = useCallback((p: number, r: number) => {
-    setPage(p);
-    setReadTo(r);
-    if (p !== startPage.current) setNavigated(true);
-  }, []);
+  const onPageChange = useCallback(
+    (p: number, r: number) => {
+      if (!baselineSet.current) {
+        baselineSet.current = true;
+        startPage.current = p;
+        trackerRef.current?.rebase(p);
+      }
+      setPage(p);
+      setReadTo(r);
+      trackerRef.current?.pageView(p);
+      if (p !== startPage.current) setNavigated(true);
+      // Llegó al final navegando, el libro no estaba terminado y aún no se festejó.
+      const bookId = loaded?.book.id;
+      if (
+        bookId &&
+        p !== startPage.current &&
+        r >= numPagesRef.current &&
+        initialProgress.current < 1 &&
+        !wasCelebrated(bookId)
+      ) {
+        markCelebrated(bookId);
+        setCelebrate(true);
+      }
+    },
+    [loaded],
+  );
 
   const goTo = useCallback((p: number) => stageRef.current?.jump(p), []);
 
@@ -482,6 +546,7 @@ function Reader() {
         onToggleSound={toggleSound}
         onToggleFocus={toggleFocus}
         onHelp={() => setHelpOpen(true)}
+        notebookHref={`/cuaderno/?id=${encodeURIComponent(book.id)}`}
       />
 
       <main
@@ -514,6 +579,10 @@ function Reader() {
         pageCount={doc.numPages}
         hidden={chromeHidden || highlighting}
         onGoTo={goTo}
+        bookmarks={bookmarks.map((b) => b.page)}
+        notes={notes.map((n) => n.page)}
+        highlights={highlights}
+        chapters={chapters}
       />
 
       <NotesPanel
@@ -566,6 +635,7 @@ function Reader() {
       <UndoToast toast={toast} onClose={() => setToast(null)} />
       <ShortcutsHelp open={helpOpen} onClose={() => setHelpOpen(false)} />
       <GestureHint />
+      <FinishCelebration title={book.title} open={celebrate} onClose={() => setCelebrate(false)} />
     </div>
   );
 }

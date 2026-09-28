@@ -433,6 +433,99 @@
   top: 0;
 }
 
+/* ── Viaje de lectura (barra inferior) ─────────────────────────────── */
+.viaje-recorrido {
+  background: linear-gradient(90deg, rgb(var(--acento) / 0.35), rgb(var(--acento)));
+  box-shadow: 0 0 10px rgb(var(--acento) / 0.5);
+  overflow: hidden;
+}
+.viaje-brilla::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, transparent, rgb(var(--fondo) / 0.75), transparent) no-repeat;
+  background-size: 35% 100%;
+  animation: viaje-brillo 3.4s ease-in-out infinite;
+}
+@keyframes viaje-brillo {
+  from {
+    background-position: -40% 0;
+  }
+  to {
+    background-position: 140% 0;
+  }
+}
+.viaje-estrella {
+  filter: drop-shadow(0 0 6px rgb(var(--acento) / 0.7));
+}
+
+/* ── Cuaderno ──────────────────────────────────────────────────────── */
+:root,
+[data-theme='dia'] {
+  --nota-adhesiva: 255 240 168; /* #FFF0A8 */
+  --marca-a: 0.55;
+}
+[data-theme='sepia'] {
+  --nota-adhesiva: 240 214 150; /* #F0D696 */
+  --marca-a: 0.55;
+}
+[data-theme='noche'] {
+  --nota-adhesiva: 58 50 120; /* #3A3278 */
+  --marca-a: 0.34;
+}
+/* Papel con renglones y línea de margen */
+.hoja-cuaderno {
+  --margen-x: 3rem;
+  background-color: rgb(var(--papel) / 0.55);
+  background-image:
+    linear-gradient(
+      90deg,
+      transparent calc(var(--margen-x) - 1px),
+      rgb(var(--acento) / 0.45) calc(var(--margen-x) - 1px),
+      rgb(var(--acento) / 0.45) calc(var(--margen-x) + 1px),
+      transparent calc(var(--margen-x) + 1px)
+    ),
+    repeating-linear-gradient(to bottom, transparent 0 31px, rgb(var(--linea) / 0.07) 31px 32px);
+}
+@media (min-width: 640px) {
+  .hoja-cuaderno {
+    --margen-x: 4rem;
+  }
+}
+/* Texto subrayado con rotulador (misma paleta que el lector) */
+.texto-marcador {
+  background: linear-gradient(
+    transparent 16%,
+    rgb(var(--hl-c) / var(--marca-a)) 16%,
+    rgb(var(--hl-c) / var(--marca-a)) 90%,
+    transparent 90%
+  );
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  padding: 0 0.15em;
+}
+/* Nota adhesiva con su tira de celo */
+.nota-adhesiva {
+  position: relative;
+  background: rgb(var(--nota-adhesiva));
+  box-shadow:
+    0 1px 1px rgb(var(--sombra) / 0.08),
+    0 8px 16px -8px rgb(var(--sombra) / 0.35);
+}
+.nota-adhesiva::before {
+  content: '';
+  position: absolute;
+  top: -7px;
+  left: 50%;
+  width: 46px;
+  height: 15px;
+  translate: -50% 0;
+  rotate: -3deg;
+  background: rgb(var(--fondo) / 0.55);
+  border: 1px solid rgb(var(--linea) / 0.08);
+}
+
 /* ── Portadas casi blancas (página 1 del PDF): velo en Sepia y Noche ── */
 .portada-clara::after {
   content: '';
@@ -489,6 +582,9 @@ html.tema-en-transicion *::after {
     animation: none;
   }
   .hl-rect.pintando {
+    animation: none;
+  }
+  .viaje-brilla::after {
     animation: none;
   }
 }

@@ -66,6 +66,24 @@ export interface Bookmark {
   createdAt: number;
 }
 
+/** Sesión de lectura: solo tiempo activo. `day` es la fecha local YYYY-MM-DD. */
+export interface ReadingSession {
+  id: string;
+  bookId: string;
+  startedAt: number;
+  endedAt: number;
+  secondsActive: number;
+  /** Páginas distintas vistas en la sesión. */
+  pagesRead: number;
+  day: string;
+}
+
+/** Segundos activos por día (agregado; una fila por día, no por sesión). */
+export interface DayTotal {
+  day: string;
+  seconds: number;
+}
+
 export type NewBook = Pick<Book, 'title' | 'author' | 'pageCount' | 'cover' | 'fileName'>;
 export type NewHighlight = Omit<Highlight, 'id' | 'createdAt'>;
 
@@ -98,6 +116,12 @@ export interface VueloStore {
   listBookmarks(bookId: string): Promise<Bookmark[]>;
   /** Devuelve el marcador creado, o null si existía y se eliminó. */
   toggleBookmark(bookId: string, page: number, label?: string | null): Promise<Bookmark | null>;
+
+  /** Crea o actualiza la sesión (se guarda varias veces mientras crece). */
+  saveSession(s: ReadingSession): Promise<void>;
+  /** Totales por día, ordenados por día, calculados con agregación (sin cargar sesiones). */
+  dailyTotals(): Promise<DayTotal[]>;
+  listFinishedBooks(): Promise<Book[]>;
 }
 
 // ──────────────────────────── Utilidades ───────────────────────────
@@ -169,6 +193,19 @@ export const MIGRATIONS: readonly string[] = [
   `,
   /* 3 — subrayados de 4 colores. `note` y `text` (texto seleccionado) ya existen desde la 1. */ `
   UPDATE highlights SET color = 'amarillo' WHERE color NOT IN ('amarillo', 'verde', 'azul', 'rosa');
+  `,
+  /* 4 — sesiones de lectura (tiempo activo por día) */ `
+  CREATE TABLE IF NOT EXISTS reading_sessions (
+    id              TEXT PRIMARY KEY,
+    book_id         TEXT NOT NULL REFERENCES books (id) ON DELETE CASCADE,
+    started_at      INTEGER NOT NULL,
+    ended_at        INTEGER NOT NULL,
+    seconds_active  INTEGER NOT NULL DEFAULT 0 CHECK (seconds_active >= 0),
+    pages_read      INTEGER NOT NULL DEFAULT 0,
+    day             TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_sessions_day ON reading_sessions (day);
+  CREATE INDEX IF NOT EXISTS idx_sessions_book ON reading_sessions (book_id);
   `,
 ];
 
@@ -327,7 +364,7 @@ async function createSqliteStore(): Promise<VueloStore> {
     async deleteBook(id) {
       const book = await store.getBook(id);
       // Borrado explícito: PRAGMA foreign_keys no está garantizado en todas las conexiones del pool.
-      for (const table of ['notes', 'highlights', 'bookmarks'] as const) {
+      for (const table of ['notes', 'highlights', 'bookmarks', 'reading_sessions'] as const) {
         await db.execute(`DELETE FROM ${table} WHERE book_id = $1`, [id]);
       }
       await db.execute('DELETE FROM books WHERE id = $1', [id]);
@@ -404,6 +441,25 @@ async function createSqliteStore(): Promise<VueloStore> {
       );
       return bm;
     },
+
+    async saveSession(s) {
+      await db.execute(
+        `INSERT OR REPLACE INTO reading_sessions (id, book_id, started_at, ended_at, seconds_active, pages_read, day)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [s.id, s.bookId, s.startedAt, s.endedAt, Math.round(s.secondsActive), s.pagesRead, s.day],
+      );
+    },
+    async dailyTotals() {
+      return db.select<DayTotal[]>(
+        'SELECT day, SUM(seconds_active) AS seconds FROM reading_sessions GROUP BY day ORDER BY day',
+      );
+    },
+    async listFinishedBooks() {
+      const rows = await db.select<BookRow[]>(
+        'SELECT * FROM books WHERE progress >= 1 ORDER BY COALESCE(last_opened_at, added_at) DESC',
+      );
+      return rows.map(toBook);
+    },
   };
   return store;
 }
@@ -416,6 +472,7 @@ interface VueloIdb extends DBSchema {
   notes: { key: string; value: Note; indexes: { bookId: string } };
   highlights: { key: string; value: Highlight; indexes: { bookId: string } };
   bookmarks: { key: string; value: Bookmark; indexes: { bookId: string; bookPage: [string, number] } };
+  sessions: { key: string; value: ReadingSession; indexes: { bookId: string; day: string } };
 }
 
 /** Registros guardados antes de la versión 2 no tienen `fileName`. */
@@ -446,6 +503,12 @@ async function createIdbStore(): Promise<VueloStore> {
           if (!isHighlightColor(cursor.value.color)) await cursor.update({ ...cursor.value, color: 'amarillo' });
           cursor = await cursor.continue();
         }
+      }
+      // v4: sesiones de lectura.
+      if (oldVersion < 4) {
+        const sessions = database.createObjectStore('sessions', { keyPath: 'id' });
+        sessions.createIndex('bookId', 'bookId');
+        sessions.createIndex('day', 'day');
       }
     },
   });
@@ -494,13 +557,18 @@ async function createIdbStore(): Promise<VueloStore> {
       });
     },
     async deleteBook(id) {
-      const tx = db.transaction(['books', 'files', 'notes', 'highlights', 'bookmarks'], 'readwrite');
+      const tx = db.transaction(['books', 'files', 'notes', 'highlights', 'bookmarks', 'sessions'], 'readwrite');
       const book = await tx.objectStore('books').get(id);
-      const removeByBook = async (store: 'notes' | 'highlights' | 'bookmarks') => {
+      const removeByBook = async (store: 'notes' | 'highlights' | 'bookmarks' | 'sessions') => {
         const keys = await tx.objectStore(store).index('bookId').getAllKeys(id);
         await Promise.all(keys.map((k) => tx.objectStore(store).delete(k)));
       };
-      await Promise.all([removeByBook('notes'), removeByBook('highlights'), removeByBook('bookmarks')]);
+      await Promise.all([
+        removeByBook('notes'),
+        removeByBook('highlights'),
+        removeByBook('bookmarks'),
+        removeByBook('sessions'),
+      ]);
       if (book) await tx.objectStore('files').delete(book.filePath);
       await tx.objectStore('books').delete(id);
       await tx.done;
@@ -553,6 +621,26 @@ async function createIdbStore(): Promise<VueloStore> {
       const bm: Bookmark = { id: uid(), bookId, page, label, createdAt: now() };
       await db.put('bookmarks', bm);
       return bm;
+    },
+
+    async saveSession(s) {
+      await db.put('sessions', { ...s, secondsActive: Math.round(s.secondsActive) });
+    },
+    async dailyTotals() {
+      // Recorre el índice por día acumulando: nunca carga todas las sesiones en memoria.
+      const totals: DayTotal[] = [];
+      let cursor = await db.transaction('sessions').store.index('day').openCursor();
+      while (cursor) {
+        const last = totals[totals.length - 1];
+        if (last && last.day === cursor.value.day) last.seconds += cursor.value.secondsActive;
+        else totals.push({ day: cursor.value.day, seconds: cursor.value.secondsActive });
+        cursor = await cursor.continue();
+      }
+      return totals;
+    },
+    async listFinishedBooks() {
+      const books = (await db.getAll('books')).map(withDefaults).filter((b) => b.progress >= 1);
+      return books.sort((a, b) => (b.lastOpenedAt ?? b.addedAt) - (a.lastOpenedAt ?? a.addedAt));
     },
   };
 }

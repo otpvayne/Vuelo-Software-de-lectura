@@ -12,6 +12,7 @@ import {
   Focus,
   Highlighter,
   Keyboard,
+  NotebookText,
   Minus,
   MoreHorizontal,
   NotebookPen,
@@ -56,6 +57,8 @@ interface ToolbarProps {
   onToggleSound(): void;
   onToggleFocus(): void;
   onHelp(): void;
+  /** Enlace al Cuaderno del libro. */
+  notebookHref: string;
 }
 
 const iconButton =
@@ -199,6 +202,9 @@ function Tools(props: ToolbarProps & { compact?: boolean }) {
       >
         {sound ? <Volume2 className="size-5" strokeWidth={1.8} /> : <VolumeX className="size-5" strokeWidth={1.8} />}
       </button>
+      <Link href={props.notebookHref} className={iconButton} aria-label="Cuaderno del libro" title="Cuaderno del libro">
+        <NotebookText className="size-5" strokeWidth={1.8} />
+      </Link>
       <button type="button" className={iconButton} onClick={props.onToggleFocus} aria-label="Modo enfoque (F)" title="Modo enfoque (F)">
         <Focus className="size-5" strokeWidth={1.8} />
       </button>

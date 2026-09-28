@@ -4,6 +4,8 @@ pub fn run() {
     // Las migraciones viven en lib/db.ts (PRAGMA user_version).
     .plugin(tauri_plugin_sql::Builder::default().build())
     .plugin(tauri_plugin_fs::init())
+    // Solo para "Guardar .md" del Cuaderno: save() añade al scope de fs únicamente el archivo elegido.
+    .plugin(tauri_plugin_dialog::init())
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(

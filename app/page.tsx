@@ -17,6 +17,7 @@ import EmptyState from '@/components/ui/EmptyState';
 import NightSky from '@/components/ui/NightSky';
 import Onboarding from '@/components/ui/Onboarding';
 import ThemeToggle from '@/components/ui/ThemeToggle';
+import ReadingSummaryChip from '@/components/stats/ReadingSummaryChip';
 import { APP_NAME, TAGLINE } from '@/lib/constants';
 import { getStore, type Book } from '@/lib/db';
 
@@ -81,6 +82,7 @@ export default function LibraryPage() {
           <h1 className="font-display text-xl font-semibold leading-none">{APP_NAME}</h1>
           <p className="mt-1 truncate text-xs text-tinta-suave/60">{TAGLINE}</p>
         </div>
+        <ReadingSummaryChip />
         {hasBooks && <AddBookButton variant="compact" onFiles={importer.importFiles} busy={importer.busy} />}
         <ThemeToggle />
       </header>

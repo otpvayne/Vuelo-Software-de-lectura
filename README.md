@@ -65,3 +65,29 @@ Solo se aplica en el build empaquetado; en `tauri dev` la página la sirve el de
 ## Instalador sin firmar
 
 Los `.exe` no están firmados. Con Smart App Control / Control de aplicaciones de Windows activo, un instalador recién compilado puede quedar bloqueado. Para distribuir, firma el binario (`bundle.windows.certificateThumbprint` o `signCommand`).
+
+## Cuaderno, viaje de lectura y metas
+
+- **Sesiones** (`lib/readingSessions.ts`, migración 4 `reading_sessions`): solo tiempo activo. Se pausa tras 60 s sin teclado/puntero/cambio de página o con la ventana oculta; se parte en la medianoche local; se guarda cada 20 s como máximo y al ocultar/salir (nunca en cada giro). No se guarda si no hubo navegación o si dura menos de 10 s. Abrir un libro (o entrar desde el Cuaderno en una página) no cuenta como navegar.
+- **Estadísticas**: `dailyTotals()` agrega por día (`GROUP BY day` en SQLite; cursor por índice en IndexedDB). Racha = días consecutivos con alguna sesión (no exige la meta). Metas en `localStorage` (`vuelo:metas-activas`, `vuelo:meta-minutos`).
+- **Viaje de lectura**: la barra inferior muestra marcadores, apuntes, subrayados agrupados y, si el PDF trae índice (`getOutline()`), los capítulos. Si no hay índice no se inventa nada.
+- **Cuaderno** (`/cuaderno/?id=`): subrayados, apuntes y marcadores por página; exporta Markdown ("Copiar como texto") y **Guardar .md**. En Tauri usa `dialog:allow-save` + `fs:allow-write-text-file` sin scope propio: el plugin de diálogo añade al scope de fs solo el archivo elegido (verificado en `tauri-plugin-dialog` 2.8.0, `commands.rs::save`). En el navegador es una descarga normal.
+
+## Pendiente de verificar en Tauri
+
+Smart App Control bloqueó los ejecutables nuevos (`os error 4551`) al añadir el plugin de diálogo, así que lo siguiente se verificó **solo en el navegador** (IndexedDB) y con el SQL de la migración sobre una **copia** de la base real con Node, pero **no** dentro de Tauri:
+
+1. **Ejecución con SQLite real**
+   - Abrir la app: `PRAGMA user_version` debe pasar de 3 a 4 y existir `reading_sessions` (base en `%APPDATA%\com.netrix.vuelo\vuelo.db`).
+   - Abrir un libro, pasar páginas durante más de 10 s y volver a la biblioteca: debe aparecer una fila con `seconds_active` razonable.
+   - Abrir un libro y salir sin navegar: no debe crearse ninguna fila.
+   - Cerrar la ventana mientras se lee: se conserva al menos el último guardado periódico (≤ 20 s perdidos). Comprobar si el guardado en `pagehide`/`beforeunload` llega a completarse en WebView2.
+   - Borrar un libro: sus filas de `reading_sessions` desaparecen.
+2. **Diálogo "Guardar como"** (`dialog:allow-save`, `fs:allow-write-text-file`)
+   - Cuaderno → **Guardar .md**: debe abrirse el diálogo nativo, y el archivo elegido debe escribirse con el mismo contenido que "Copiar como texto".
+   - Cancelar el diálogo: no se escribe nada ni aparece un error.
+   - Desde la consola del webview, `writeTextFile` a otra ruta fuera de AppData debe **fallar** (el scope solo incluye el archivo elegido).
+3. **CSP del build empaquetado**
+   - `npm run tauri build`, abrir `/cuaderno/`, `/lectura/` y el lector: sin eventos `securitypolicyviolation` ni errores de consola; el SVG de la semana, el brillo del camino y la descarga/guardado deben funcionar.
+
+Para poder ejecutar los binarios hace falta firmarlos o que Smart App Control no bloquee la app (decisión del usuario; desactivarlo no tiene vuelta atrás sin reinstalar Windows).

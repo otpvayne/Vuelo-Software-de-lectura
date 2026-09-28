@@ -3,12 +3,13 @@
 import { forwardRef, useEffect, useRef, useState, type MouseEvent, type PointerEvent } from 'react';
 import Link from 'next/link';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
-import { Star, Trash2, X } from 'lucide-react';
+import { NotebookText, Star, Trash2, X } from 'lucide-react';
 import type { Book } from '@/lib/db';
 import GeneratedCover, { paletteClass } from './GeneratedCover';
 import { useLightCover } from './useCoverTone';
 
 export const readerHref = (id: string) => `/lector/?id=${encodeURIComponent(id)}`;
+export const notebookHref = (id: string) => `/cuaderno/?id=${encodeURIComponent(id)}`;
 
 /** Grosor del lomo en px según el número de páginas (con mínimo y máximo). */
 export const spineWidth = (pages: number) => Math.round(Math.min(26, Math.max(6, 5 + pages * 0.075)));
@@ -198,7 +199,7 @@ const BookCard = forwardRef<HTMLLIElement, BookCardProps>(function BookCard(
         {onDelete && (
           // Fuera del <Link> para no anidar elementos interactivos.
           <div
-            className="acciones-tarjeta absolute -right-3 flex gap-1.5"
+            className="acciones-tarjeta absolute -right-3 flex flex-col items-end gap-1.5"
             style={{ top: LIFT_ROOM - 10 }}
             data-abierto={confirming || undefined}
           >
@@ -246,6 +247,16 @@ const BookCard = forwardRef<HTMLLIElement, BookCardProps>(function BookCard(
                 </motion.button>
               )}
             </AnimatePresence>
+            {!confirming && (
+              <Link
+                href={notebookHref(book.id)}
+                aria-label={`Cuaderno de ${book.title}`}
+                title="Cuaderno: subrayados, apuntes y marcadores"
+                className="barra grid size-9 place-items-center rounded-suave"
+              >
+                <NotebookText className="size-4" strokeWidth={1.8} />
+              </Link>
+            )}
           </div>
         )}
       </div>

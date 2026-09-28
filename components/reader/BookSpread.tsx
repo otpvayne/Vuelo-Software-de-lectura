@@ -208,7 +208,9 @@ const BookSpread = forwardRef<BookSpreadHandle, BookSpreadProps>(function BookSp
         renderOnlyPageLengthChange
         onInit={(e: { data: { page: number; mode: Orientation } }) => {
           applyInteractive();
-          report(e.data.page + 1, e.data.mode);
+          // e.data.page es la página pedida; en doble página el flip muestra la pareja que la
+          // contiene (13-14 para 14): se informa la izquierda real.
+          report((api()?.getCurrentPageIndex() ?? e.data.page) + 1, e.data.mode);
         }}
         onFlip={(e: { data: number }) => report(e.data + 1, api()?.getOrientation() ?? 'portrait')}
         onChangeState={(e: { data: string }) => {
