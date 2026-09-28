@@ -9,6 +9,8 @@ const SHORTCUTS: [string[], string][] = [
   [['Inicio', 'Fin'], 'Primera / última página'],
   [['G'], 'Ir a página'],
   [['F'], 'Modo enfoque'],
+  [['H'], 'Subrayar: selecciona texto y al soltar se guarda'],
+  [['Ctrl', 'Z'], 'Quitar el último subrayado'],
   [['Esc'], 'Salir del enfoque o cerrar paneles'],
   [['+', '−', '0'], 'Ampliar / alejar / 100 %'],
   [['Ctrl', 'rueda'], 'Zoom con el ratón'],

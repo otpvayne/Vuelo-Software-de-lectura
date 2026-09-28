@@ -4,29 +4,37 @@
  * Visor. Con `output: 'export'` no existen rutas dinámicas en runtime (los id viven
  * en la base local), así que el libro llega por query: /lector/?id=<uuid>.
  */
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { useReducedMotion } from 'motion/react';
 import { Loader2 } from 'lucide-react';
 import GestureHint from '@/components/reader/GestureHint';
-import NotesPanel from '@/components/reader/NotesPanel';
+import HighlightMenu from '@/components/reader/HighlightMenu';
+import HighlighterPalette from '@/components/reader/HighlighterPalette';
+import NotesPanel, { type PanelTab } from '@/components/reader/NotesPanel';
 import { RENDER_WINDOW } from '@/components/reader/PdfPage';
 import ProgressScrubber from '@/components/reader/ProgressScrubber';
 import ReaderStage, { ZOOM_STEPS, clampZoom, type ReaderStageHandle } from '@/components/reader/ReaderStage';
 import ShortcutsHelp from '@/components/reader/ShortcutsHelp';
 import Toolbar from '@/components/reader/Toolbar';
+import UndoToast from '@/components/reader/UndoToast';
 import EmptyState from '@/components/ui/EmptyState';
-import type { Theme } from '@/lib/constants';
-import { getStore, type Book, type Bookmark, type Highlight, type Note } from '@/lib/db';
+import { copyText } from '@/lib/clipboard';
+import { HIGHLIGHT_META, type HighlightColor, type Theme } from '@/lib/constants';
+import { getStore, type Book, type Bookmark, type Highlight, type HighlightPatch, type Note } from '@/lib/db';
+import type { PageSelection } from '@/lib/highlightGeometry';
+import { HighlightBook } from '@/lib/highlightStore';
 import { PageCache, ReaderSignal } from '@/lib/pageCache';
 import { playPageTurn, unlockPageSound } from '@/lib/pageSound';
 import { closePdf, openPdf } from '@/lib/pdf';
 import {
+  getHighlightColor,
   getPaperMode,
   getSoundEnabled,
   paperModesFor,
+  setHighlightColor,
   setPaperMode,
   setSoundEnabled,
   type PaperMode,
@@ -38,8 +46,12 @@ interface Loaded {
   doc: PDFDocumentProxy;
   cache: PageCache;
   signal: ReaderSignal;
+  highlights: HighlightBook;
   aspect: number;
 }
+
+/** Tiempo que un subrayado recién creado conserva su animación de "pintado". */
+const FRESH_MS = 1500;
 
 /** En modo enfoque, la interfaz se oculta tras este tiempo sin actividad en los bordes. */
 const FOCUS_IDLE_MS = 2500;
@@ -64,7 +76,13 @@ function Reader() {
    */
   const [navigated, setNavigated] = useState(false);
   const [notes, setNotes] = useState<Note[]>([]);
-  const [highlights, setHighlights] = useState<Highlight[]>([]);
+  const [highlighting, setHighlighting] = useState(false);
+  const [hlColor, setHlColor] = useState<HighlightColor>('amarillo');
+  const [panelTab, setPanelTab] = useState<PanelTab>('apuntes');
+  const [menu, setMenu] = useState<{ id: string; anchor: HTMLElement } | null>(null);
+  const [toast, setToast] = useState<{ id: number; text: string; onUndo?: () => void } | null>(null);
+  /** Subrayados creados en esta sesión, para Ctrl+Z. */
+  const created = useRef<string[]>([]);
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
   const [notesOpen, setNotesOpen] = useState(false);
   const [zoom, setZoom] = useState(1);
@@ -108,13 +126,13 @@ function Reader() {
       signal.set({ current: book.currentPage });
       startPage.current = book.currentPage;
       setNotes(n);
-      setHighlights(h);
       setBookmarks(b);
       setPage(book.currentPage);
       setReadTo(book.currentPage);
-      setLoaded({ book, doc, cache, signal, aspect: first.height / first.width });
+      const highlights = new HighlightBook(h);
+      setLoaded({ book, doc, cache, signal, highlights, aspect: first.height / first.width });
       if (process.env.NODE_ENV !== 'production') {
-        (window as unknown as { __vuelo?: unknown }).__vuelo = { cache, signal, stage: stageRef };
+        (window as unknown as { __vuelo?: unknown }).__vuelo = { cache, signal, highlights, stage: stageRef };
       }
     })().catch((err: unknown) => {
       console.error(err);
@@ -137,6 +155,7 @@ function Reader() {
     return () => window.removeEventListener('vuelo:tema', onTheme);
   }, []);
   useEffect(() => setPaper(getPaperMode(theme)), [theme]);
+  useEffect(() => setHlColor(getHighlightColor()), []);
 
   // El audio solo arranca tras un gesto del usuario, y solo si el sonido está activado.
   useEffect(() => {
@@ -159,6 +178,97 @@ function Reader() {
     }, 400);
     return () => clearTimeout(t);
   }, [loaded, navigated, page, readTo]);
+
+  // ── Subrayados ──
+  const onSelection = useCallback(
+    async (parts: PageSelection[]) => {
+      if (!loaded) return;
+      const store = await getStore();
+      for (const part of parts) {
+        const h = await store.addHighlight({
+          bookId: loaded.book.id,
+          page: part.page,
+          rects: part.rects,
+          color: hlColor,
+          text: part.text,
+          note: null,
+        });
+        loaded.highlights.upsert(h, true);
+        created.current.push(h.id);
+        setTimeout(() => {
+          if (loaded.highlights.freshId === h.id) loaded.highlights.freshId = null;
+        }, FRESH_MS);
+      }
+    },
+    [loaded, hlColor],
+  );
+
+  const updateHighlight = useCallback(
+    (hid: string, patch: HighlightPatch) => {
+      if (!loaded) return;
+      loaded.highlights.update(hid, patch);
+      void getStore().then((s) => s.updateHighlight(hid, patch));
+    },
+    [loaded],
+  );
+
+  const deleteHighlight = useCallback(
+    (hid: string) => {
+      if (!loaded) return;
+      loaded.highlights.remove(hid);
+      setMenu((m) => (m?.id === hid ? null : m));
+      void getStore().then((s) => s.deleteHighlight(hid));
+    },
+    [loaded],
+  );
+
+  const restoreHighlight = useCallback(
+    (h: Highlight) => {
+      if (!loaded) return;
+      loaded.highlights.upsert(h);
+      created.current.push(h.id);
+      void getStore().then((s) => s.restoreHighlight(h));
+    },
+    [loaded],
+  );
+
+  /** Ctrl+Z: quita el último subrayado creado en la sesión (con "Deshacer"). */
+  const undoLastHighlight = useCallback(() => {
+    if (!loaded) return;
+    let h: Highlight | undefined;
+    while (!h && created.current.length) h = loaded.highlights.get(created.current.pop() ?? '');
+    if (!h) return;
+    const removed = h;
+    deleteHighlight(removed.id);
+    setToast({ id: Date.now(), text: 'Subrayado quitado', onUndo: () => restoreHighlight(removed) });
+  }, [loaded, deleteHighlight, restoreHighlight]);
+
+  const copyAllHighlights = useCallback(
+    (list: readonly Highlight[]) =>
+      copyText(
+        list
+          .map((h) => {
+            const meta = HIGHLIGHT_META[h.color];
+            const head = `Pág. ${h.page} · ${meta.label} (${meta.meaning.toLowerCase()})`;
+            return [head, `«${h.text ?? ''}»`, h.note ? `Nota: ${h.note}` : null].filter(Boolean).join('\n');
+          })
+          .join('\n\n'),
+      ),
+    [],
+  );
+
+  const chooseColor = useCallback((c: HighlightColor) => {
+    setHlColor(c);
+    setHighlightColor(c);
+  }, []);
+
+  const toggleHighlighting = useCallback(() => {
+    setMenu(null);
+    setHighlighting((on) => !on);
+  }, []);
+
+  // El menú de un subrayado se cierra al cambiar de página (su ancla deja de verse).
+  useEffect(() => setMenu(null), [page]);
 
   // La caché conserva solo las páginas cercanas a la actual.
   useEffect(() => {
@@ -217,12 +327,18 @@ function Reader() {
   // ── Teclado ──
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (isTyping(e.target) || e.altKey || e.metaKey || (e.ctrlKey && !['+', '-', '=', '0'].includes(e.key))) return;
+      if (isTyping(e.target) || e.altKey || e.metaKey || (e.ctrlKey && !['+', '-', '=', '0', 'z', 'Z'].includes(e.key)))
+        return;
+      if (e.ctrlKey && (e.key === 'z' || e.key === 'Z')) {
+        e.preventDefault();
+        undoLastHighlight();
+        return;
+      }
       const target = e.target as HTMLElement | null;
       // La barra de progreso maneja sus propias teclas de navegación; el resto de atajos sigue activo.
       if (target?.getAttribute?.('role') === 'slider' && SLIDER_KEYS.has(e.key)) return;
       // Espacio/Enter sobre un botón o enlace: su acción normal, no pasar página.
-      if ((e.key === ' ' || e.key === 'Enter') && target?.closest?.('button, a')) return;
+      if ((e.key === ' ' || e.key === 'Enter') && target?.closest?.('button, a, [role="button"]')) return;
       const stage = stageRef.current;
       switch (e.key) {
         case 'ArrowRight':
@@ -252,6 +368,10 @@ function Reader() {
         case 'F':
           toggleFocus();
           break;
+        case 'h':
+        case 'H':
+          toggleHighlighting();
+          break;
         case '+':
         case '=':
           zoomStep(1);
@@ -269,6 +389,7 @@ function Reader() {
         case 'Escape':
           if (helpOpen) setHelpOpen(false);
           else if (notesOpen) setNotesOpen(false);
+          else if (highlighting) setHighlighting(false);
           else if (focus) setFocus(false);
           else if (zoom > 1) setZoom(1);
           else return;
@@ -280,7 +401,7 @@ function Reader() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [loaded, focus, helpOpen, notesOpen, zoom, goTo, toggleFocus, zoomStep]);
+  }, [loaded, focus, helpOpen, notesOpen, highlighting, zoom, goTo, toggleFocus, toggleHighlighting, zoomStep, undoLastHighlight]);
 
   // ── Modo enfoque: la interfaz aparece al acercarse a los bordes y se oculta sola ──
   const hideTimer = useRef<ReturnType<typeof setTimeout>>();
@@ -307,12 +428,6 @@ function Reader() {
     };
   }, [focus]);
 
-  const highlightsByPage = useMemo(() => {
-    const map = new Map<number, Highlight[]>();
-    for (const h of highlights) map.set(h.page, [...(map.get(h.page) ?? []), h]);
-    return map;
-  }, [highlights]);
-
   if (failed) {
     return (
       <main className="grid min-h-dvh place-items-center">
@@ -331,11 +446,15 @@ function Reader() {
 
   if (!loaded) return <ReaderLoading />;
 
-  const { book, doc, cache, signal, aspect } = loaded;
+  const { book, doc, cache, signal, highlights, aspect } = loaded;
   const chromeHidden = focus && !chromeVisible;
 
   return (
-    <div className={`papel-${paper} h-dvh overflow-hidden bg-fondo`} data-enfoque={focus || undefined}>
+    <div
+      className={`papel-${paper} lapiz-${hlColor} h-dvh overflow-hidden bg-fondo`}
+      data-enfoque={focus || undefined}
+      data-subrayando={highlighting || undefined}
+    >
       <Toolbar
         title={book.title}
         page={page}
@@ -343,6 +462,7 @@ function Reader() {
         pageCount={doc.numPages}
         bookmarked={bookmarks.some((b) => b.page === page)}
         notesOpen={notesOpen}
+        highlighting={highlighting}
         zoom={zoom}
         paper={paper}
         paperModes={paperModesFor(theme)}
@@ -354,6 +474,7 @@ function Reader() {
         onGoTo={goTo}
         onToggleBookmark={() => void toggleBookmark()}
         onToggleNotes={() => setNotesOpen((o) => !o)}
+        onToggleHighlight={toggleHighlighting}
         onZoomIn={() => zoomStep(1)}
         onZoomOut={() => zoomStep(-1)}
         onZoomReset={() => setZoom(1)}
@@ -375,7 +496,10 @@ function Reader() {
           numPages={doc.numPages}
           aspect={aspect}
           page={page}
-          highlightsByPage={highlightsByPage}
+          highlights={highlights}
+          onOpenHighlight={(h, anchor) => setMenu({ id: h.id, anchor })}
+          highlighting={highlighting}
+          onSelection={(parts) => void onSelection(parts)}
           reduceMotion={reduce}
           zoom={zoom}
           onZoomChange={setZoom}
@@ -388,15 +512,27 @@ function Reader() {
         page={page}
         lastVisible={readTo}
         pageCount={doc.numPages}
-        hidden={chromeHidden}
+        hidden={chromeHidden || highlighting}
         onGoTo={goTo}
       />
 
       <NotesPanel
         open={notesOpen && !focus}
+        tab={panelTab}
+        onTab={setPanelTab}
         page={page}
         notes={notes}
+        bookmarks={bookmarks}
+        highlights={highlights}
         onClose={() => setNotesOpen(false)}
+        onRemoveBookmark={async (p) => {
+          const store = await getStore();
+          await store.toggleBookmark(book.id, p);
+          setBookmarks(await store.listBookmarks(book.id));
+        }}
+        onUpdateHighlight={updateHighlight}
+        onDeleteHighlight={deleteHighlight}
+        onCopyAll={copyAllHighlights}
         onGoTo={goTo}
         onAdd={async (content) => {
           const store = await getStore();
@@ -409,6 +545,25 @@ function Reader() {
         }}
       />
 
+      <HighlighterPalette
+        open={highlighting && !(focus && !chromeVisible)}
+        color={hlColor}
+        onColor={chooseColor}
+        onDone={() => setHighlighting(false)}
+      />
+      {menu && (
+        <HighlightMenu
+          key={menu.id}
+          store={highlights}
+          id={menu.id}
+          anchor={menu.anchor}
+          onUpdate={updateHighlight}
+          onDelete={deleteHighlight}
+          onCopy={copyText}
+          onClose={() => setMenu(null)}
+        />
+      )}
+      <UndoToast toast={toast} onClose={() => setToast(null)} />
       <ShortcutsHelp open={helpOpen} onClose={() => setHelpOpen(false)} />
       <GestureHint />
     </div>

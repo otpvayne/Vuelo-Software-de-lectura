@@ -25,8 +25,18 @@ export const THEME_LABELS: Record<Theme, string> = {
   noche: 'Noche',
 };
 
-/** Colores de subrayado: nombres de token, nunca HEX. */
-export const HIGHLIGHT_COLORS = ['acento', 'papel'] as const;
+/** Colores de subrayado: nombres de token (--hl-<color> en globals.css), nunca HEX. */
+export const HIGHLIGHT_COLORS = ['amarillo', 'verde', 'azul', 'rosa'] as const;
 export type HighlightColor = (typeof HIGHLIGHT_COLORS)[number];
+
+export const HIGHLIGHT_META: Record<HighlightColor, { label: string; meaning: string }> = {
+  amarillo: { label: 'Amarillo', meaning: 'Importante' },
+  verde: { label: 'Verde', meaning: 'Idea' },
+  azul: { label: 'Azul', meaning: 'Duda' },
+  rosa: { label: 'Rosa', meaning: 'Frase favorita' },
+};
+
+export const isHighlightColor = (v: unknown): v is HighlightColor =>
+  typeof v === 'string' && (HIGHLIGHT_COLORS as readonly string[]).includes(v);
 
 export const THEME_TRANSITION_MS = 450;

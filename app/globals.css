@@ -270,6 +270,169 @@
   background: rgb(var(--fondo));
 }
 
+/* ── Subrayados ───────────────────────────────────────────────────
+ * Colores de rotulador como canales RGB. Mezcla por papel:
+ * - Papel claro (Día, Sepia, Noche+Natural): multiply, como tinta de rotulador sobre papel:
+ *   el blanco toma el color y la tinta del texto queda intacta.
+ * - Noche+Suave: igual, algo más opaco porque la página está atenuada.
+ * - Noche+Invertido: la página es oscura y el texto claro; multiply lo haría invisible.
+ *   Se usa screen con tonos profundos: el fondo se tiñe y el texto sigue claro y legible. */
+:root {
+  --hl-amarillo: 255 214 64; /* #FFD640 */
+  --hl-verde: 140 220 110; /* #8CDC6E */
+  --hl-azul: 118 188 255; /* #76BCFF */
+  --hl-rosa: 255 146 196; /* #FF92C4 */
+  --hl-a: 0.55;
+  --hl-blend: multiply;
+  --hl-sel: var(--hl-amarillo);
+}
+[data-theme='noche'] .papel-suave {
+  --hl-a: 0.62;
+}
+[data-theme='noche'] .papel-invertido {
+  --hl-amarillo: 150 116 16; /* #967410 */
+  --hl-verde: 54 118 50; /* #367632 */
+  --hl-azul: 36 88 164; /* #2458A4 */
+  --hl-rosa: 150 44 100; /* #962C64 */
+  --hl-a: 0.95;
+  --hl-blend: screen;
+}
+.hl-amarillo { --hl-c: var(--hl-amarillo); }
+.hl-verde { --hl-c: var(--hl-verde); }
+.hl-azul { --hl-c: var(--hl-azul); }
+.hl-rosa { --hl-c: var(--hl-rosa); }
+/* Muestras fijas (paleta, menú, panel): no cambian con el papel invertido. */
+.muestra-amarillo { background-color: rgb(255 214 64); } /* #FFD640 */
+.muestra-verde { background-color: rgb(140 220 110); } /* #8CDC6E */
+.muestra-azul { background-color: rgb(118 188 255); } /* #76BCFF */
+.muestra-rosa { background-color: rgb(255 146 196); } /* #FF92C4 */
+/* El check sobre una muestra siempre en tinta oscura (las muestras son claras en todos los temas). */
+[class*='muestra-'] > svg { color: rgb(43 35 64); } /* #2B2340 */
+.lapiz-amarillo { --hl-sel: var(--hl-amarillo); }
+.lapiz-verde { --hl-sel: var(--hl-verde); }
+.lapiz-azul { --hl-sel: var(--hl-azul); }
+.lapiz-rosa { --hl-sel: var(--hl-rosa); }
+
+.capa-subrayados {
+  position: absolute;
+  inset: 0;
+  /* Sin z-index a propósito: si creara un contexto de apilamiento, mix-blend-mode
+     mezclaría contra transparente en vez de contra el canvas de la página. */
+  pointer-events: none;
+}
+.hl-rect {
+  position: absolute;
+  border-radius: 2px;
+  background: rgb(var(--hl-c) / var(--hl-a));
+  mix-blend-mode: var(--hl-blend);
+  pointer-events: auto;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.hl-rect:focus-visible {
+  mix-blend-mode: normal;
+  background: rgb(var(--hl-c) / 0.35);
+  box-shadow: none;
+  outline: 2px solid rgb(var(--acento));
+  outline-offset: 2px;
+}
+/* Con la herramienta Subrayar, la capa de texto va encima: se puede seleccionar sobre subrayados. */
+.subrayando .hl-rect {
+  pointer-events: none;
+}
+.hl-nota {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  border-radius: 9999px;
+  background: rgb(var(--fondo) / 0.92);
+  color: rgb(var(--tinta));
+  box-shadow: 0 1px 3px rgb(var(--sombra) / 0.3);
+  pointer-events: auto;
+}
+.subrayando .hl-nota {
+  pointer-events: none;
+}
+@keyframes hl-pintar {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+.hl-rect.pintando {
+  animation: hl-pintar 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: var(--hl-delay, 0ms);
+}
+
+/* ── Capa de texto de pdfjs v6 (copiada de pdf_viewer.css, sin anidamiento) ── */
+.capa-texto {
+  position: absolute;
+  inset: 0;
+  /* setLayerDimensions escribe width/height con round(); se fuerza el tamaño del hueco. */
+  width: 100% !important;
+  height: 100% !important;
+  z-index: 2;
+  overflow: clip;
+  line-height: 1;
+  text-align: initial;
+  letter-spacing: normal;
+  word-spacing: normal;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  caret-color: transparent;
+  -webkit-touch-callout: none;
+  --scale-round-x: 1px;
+  --scale-round-y: 1px;
+  --min-font-size: 1;
+  --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
+  --min-font-size-inv: calc(1 / var(--min-font-size));
+}
+.capa-texto :is(span, br) {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+  user-select: text;
+}
+.capa-texto > :not(.markedContent),
+.capa-texto .markedContent span:not(.markedContent) {
+  z-index: 1;
+  --font-height: 0;
+  font-size: calc(var(--text-scale-factor) * var(--font-height));
+  --scale-x: 1;
+  --rotate: 0deg;
+  transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
+}
+.capa-texto .markedContent {
+  display: contents;
+}
+.capa-texto span[role='img'] {
+  user-select: none;
+  cursor: default;
+}
+.capa-texto ::selection {
+  background: rgb(var(--hl-sel) / 0.45);
+  color: transparent;
+}
+.capa-texto br::selection {
+  background: transparent;
+}
+.capa-texto .endOfContent {
+  display: block;
+  position: absolute;
+  inset: 100% 0 0;
+  z-index: 0;
+  cursor: default;
+  user-select: none;
+}
+.capa-texto.selecting .endOfContent {
+  top: 0;
+}
+
 /* ── Portadas casi blancas (página 1 del PDF): velo en Sepia y Noche ── */
 .portada-clara::after {
   content: '';
@@ -323,6 +486,9 @@ html.tema-en-transicion *::after {
     transition: none !important;
   }
   .cielo.titila span {
+    animation: none;
+  }
+  .hl-rect.pintando {
     animation: none;
   }
 }

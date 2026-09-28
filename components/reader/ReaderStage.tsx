@@ -12,6 +12,8 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react';
 import type { Highlight } from '@/lib/db';
+import { splitSelectionByPage, type PageSelection } from '@/lib/highlightGeometry';
+import type { HighlightBook } from '@/lib/highlightStore';
 import type { PageCache, ReaderSignal } from '@/lib/pageCache';
 import BookSpread, { type BookSpreadHandle, type Orientation } from './BookSpread';
 import PdfPage from './PdfPage';
@@ -24,6 +26,8 @@ export const clampZoom = (z: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Ma
 /** A partir de este ancho se lee a doble página (igual que decide page-flip). */
 const SPREAD_MIN_WIDTH = 900;
 const DOUBLE_TAP_MS = 300;
+/** Táctil: la selección con manijas no emite "soltar"; se da por terminada tras esta pausa. */
+const TOUCH_SELECTION_IDLE_MS = 800;
 
 export interface ReaderStageHandle {
   next(): void;
@@ -42,7 +46,12 @@ interface ReaderStageProps {
   aspect: number;
   /** Página actual (izquierda en doble página), 1-based. */
   page: number;
-  highlightsByPage: ReadonlyMap<number, Highlight[]>;
+  highlights: HighlightBook;
+  onOpenHighlight(h: Highlight, anchor: HTMLElement): void;
+  /** Herramienta Subrayar activa: vista estática con texto seleccionable. */
+  highlighting: boolean;
+  /** Selección terminada, ya dividida por página y en proporciones 0-1. */
+  onSelection(parts: PageSelection[]): void;
   reduceMotion: boolean;
   zoom: number;
   onZoomChange(z: number): void;
@@ -60,7 +69,22 @@ interface Anchor {
 }
 
 const ReaderStage = forwardRef<ReaderStageHandle, ReaderStageProps>(function ReaderStage(
-  { cache, signal, numPages, aspect, page, highlightsByPage, reduceMotion, zoom, onZoomChange, onPageChange, onFlipStart },
+  {
+    cache,
+    signal,
+    numPages,
+    aspect,
+    page,
+    highlights,
+    onOpenHighlight,
+    highlighting,
+    onSelection,
+    reduceMotion,
+    zoom,
+    onZoomChange,
+    onPageChange,
+    onFlipStart,
+  },
   ref,
 ) {
   const stageRef = useRef<HTMLDivElement>(null);
@@ -69,10 +93,13 @@ const ReaderStage = forwardRef<ReaderStageHandle, ReaderStageProps>(function Rea
   const spreadRef = useRef<BookSpreadHandle>(null);
   const [box, setBox] = useState<{ w: number; h: number } | null>(null);
   const zoomed = zoom > 1.001;
+  // La vista estática (sin flip) se usa con zoom y con la herramienta Subrayar:
+  // page-flip captura el ratón y no convive con la selección de texto.
+  const staticView = zoomed || highlighting;
 
   // Valores "vivos" para manejadores registrados una sola vez.
-  const live = useRef({ zoom, page, zoomed });
-  live.current = { zoom, page, zoomed };
+  const live = useRef({ zoom, page, zoomed, staticView, highlighting });
+  live.current = { zoom, page, zoomed, staticView, highlighting };
   const anchor = useRef<Anchor | null>(null);
 
   useEffect(() => {
@@ -101,12 +128,12 @@ const ReaderStage = forwardRef<ReaderStageHandle, ReaderStageProps>(function Rea
   const spreadStart = layout?.landscape ? page - ((page - 1) % 2) : page;
   const zoomPages = layout?.landscape && spreadStart + 1 <= numPages ? [spreadStart, spreadStart + 1] : [spreadStart];
 
-  // Mientras hay zoom, los canvas los usa la vista estática: el flip suelta los suyos.
+  // En la vista estática, los canvas los usa ella: el flip suelta los suyos.
   useEffect(() => {
-    signal.set({ flipEnabled: !zoomed });
-    // Al volver a 100 %, el flip (oculto pero montado) salta a donde se navegó con zoom.
-    if (!zoomed) spreadRef.current?.jump(live.current.page);
-  }, [zoomed, signal]);
+    signal.set({ flipEnabled: !staticView });
+    // Al volver al flip (oculto pero montado), salta a la página a la que se navegó.
+    if (!staticView) spreadRef.current?.jump(live.current.page);
+  }, [staticView, signal]);
 
   const report = useCallback(
     (p: number) => onPageChange(p, layout?.landscape ? Math.min(p + 1, numPages) : p, orientation),
@@ -120,7 +147,7 @@ const ReaderStage = forwardRef<ReaderStageHandle, ReaderStageProps>(function Rea
       const stage = stageRef.current;
       if (!stage) return onZoomChange(next);
       const view = stage.getBoundingClientRect();
-      const target = live.current.zoomed
+      const target = live.current.staticView
         ? contentRef.current?.getBoundingClientRect()
         : stage.querySelector('.stf__parent')?.getBoundingClientRect();
       const cx = clientX ?? view.left + view.width / 2;
@@ -142,7 +169,7 @@ const ReaderStage = forwardRef<ReaderStageHandle, ReaderStageProps>(function Rea
   useLayoutEffect(() => {
     const scroller = scrollRef.current;
     const content = contentRef.current;
-    if (!zoomed || !scroller || !content) return;
+    if (!staticView || !scroller || !content) return;
     const a = anchor.current ?? {
       fx: 0.5,
       fy: 0.5,
@@ -152,13 +179,13 @@ const ReaderStage = forwardRef<ReaderStageHandle, ReaderStageProps>(function Rea
     scroller.scrollLeft = content.offsetLeft + a.fx * content.offsetWidth - a.px;
     scroller.scrollTop = content.offsetTop + a.fy * content.offsetHeight - a.py;
     anchor.current = null;
-  }, [zoom, zoomed]);
+  }, [zoom, staticView]);
 
   useImperativeHandle(
     ref,
     () => ({
       next: () => {
-        if (!live.current.zoomed) return spreadRef.current?.next();
+        if (!live.current.staticView) return spreadRef.current?.next();
         const p = Math.min(numPages, spreadStart + step);
         if (p !== spreadStart && p <= numPages) {
           onFlipStart();
@@ -166,7 +193,7 @@ const ReaderStage = forwardRef<ReaderStageHandle, ReaderStageProps>(function Rea
         }
       },
       prev: () => {
-        if (!live.current.zoomed) return spreadRef.current?.prev();
+        if (!live.current.staticView) return spreadRef.current?.prev();
         const p = Math.max(1, spreadStart - step);
         if (p !== spreadStart) {
           onFlipStart();
@@ -175,7 +202,7 @@ const ReaderStage = forwardRef<ReaderStageHandle, ReaderStageProps>(function Rea
       },
       jump: (p) => {
         const target = Math.min(numPages, Math.max(1, p));
-        if (live.current.zoomed) report(layout?.landscape ? target - ((target - 1) % 2) : target);
+        if (live.current.staticView) report(layout?.landscape ? target - ((target - 1) % 2) : target);
         else spreadRef.current?.jump(target);
       },
       zoomTo,
@@ -217,7 +244,57 @@ const ReaderStage = forwardRef<ReaderStageHandle, ReaderStageProps>(function Rea
     else zoomTo(2, x, y);
   };
 
+  // ── Subrayar: al terminar la selección se crea el subrayado, sin pasos extra ──
+  const commitSelection = useCallback(() => {
+    if (!live.current.highlighting) return;
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || !sel.rangeCount || !contentRef.current) return;
+    const range = sel.getRangeAt(0);
+    if (!contentRef.current.contains(range.commonAncestorContainer)) return;
+    const pages = Array.from(contentRef.current.querySelectorAll<HTMLElement>('.pagina-pdf'));
+    const parts = splitSelectionByPage(range, pages);
+    sel.removeAllRanges();
+    if (parts.length) onSelection(parts);
+  }, [onSelection]);
+
+  useEffect(() => {
+    if (!highlighting) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let touching = false;
+    const onUp = (e: PointerEvent) => {
+      touching = false;
+      if (e.pointerType === 'mouse' || e.pointerType === 'pen') commitSelection();
+    };
+    const onDown = (e: PointerEvent) => {
+      if (e.pointerType === 'touch') touching = true;
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key === 'Shift') commitSelection();
+    };
+    // Táctil: manijas nativas; se crea al quedar la selección quieta un momento.
+    const onSelectionChange = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        if (!touching) commitSelection();
+      }, TOUCH_SELECTION_IDLE_MS);
+    };
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointerdown', onDown);
+    window.addEventListener('keyup', onKeyUp);
+    document.addEventListener('selectionchange', onSelectionChange);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointerdown', onDown);
+      window.removeEventListener('keyup', onKeyUp);
+      document.removeEventListener('selectionchange', onSelectionChange);
+      window.getSelection()?.removeAllRanges();
+    };
+  }, [highlighting, commitSelection]);
+
   const onPointerDownCapture = (e: ReactPointerEvent) => {
+    // Con Subrayar, el arrastre selecciona texto: sin pan, pellizco ni doble toque propios.
+    if (live.current.highlighting) return;
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     downAt.current = { t: performance.now(), x: e.clientX, y: e.clientY };
     if (pointers.current.size === 2) {
@@ -226,7 +303,7 @@ const ReaderStage = forwardRef<ReaderStageHandle, ReaderStageProps>(function Rea
       setPanning(false);
       return;
     }
-    if (live.current.zoomed && scrollRef.current && (e.pointerType !== 'mouse' || e.button === 0)) {
+    if (live.current.staticView && scrollRef.current && (e.pointerType !== 'mouse' || e.button === 0)) {
       pan.current = { x: e.clientX, y: e.clientY, left: scrollRef.current.scrollLeft, top: scrollRef.current.scrollTop };
       scrollRef.current.setPointerCapture(e.pointerId);
       setPanning(true);
@@ -250,6 +327,7 @@ const ReaderStage = forwardRef<ReaderStageHandle, ReaderStageProps>(function Rea
   };
 
   const onPointerUpCapture = (e: ReactPointerEvent) => {
+    if (!pointers.current.has(e.pointerId)) return;
     pointers.current.delete(e.pointerId);
     if (pointers.current.size < 2) pinch.current = null;
     if (!pointers.current.size) {
@@ -278,7 +356,9 @@ const ReaderStage = forwardRef<ReaderStageHandle, ReaderStageProps>(function Rea
   return (
     <div
       ref={stageRef}
-      className="relative size-full touch-none select-none"
+      className={`relative size-full ${
+        highlighting ? 'subrayando touch-pan-x touch-pan-y select-text' : 'touch-none select-none'
+      }`}
       onPointerDownCapture={onPointerDownCapture}
       onPointerMoveCapture={onPointerMoveCapture}
       onPointerUpCapture={onPointerUpCapture}
@@ -286,8 +366,8 @@ const ReaderStage = forwardRef<ReaderStageHandle, ReaderStageProps>(function Rea
     >
       {/* Flip: siempre montado; oculto (sin perder su estado) mientras hay zoom. */}
       <div
-        className={`absolute inset-0 grid place-items-center ${zoomed ? 'pointer-events-none invisible' : ''}`}
-        aria-hidden={zoomed || undefined}
+        className={`absolute inset-0 grid place-items-center ${staticView ? 'pointer-events-none invisible' : ''}`}
+        aria-hidden={staticView || undefined}
       >
         {layout && layout.w > 0 && (
           <BookSpread
@@ -298,8 +378,10 @@ const ReaderStage = forwardRef<ReaderStageHandle, ReaderStageProps>(function Rea
             width={layout.w}
             height={layout.h}
             startPage={page}
-            highlightsByPage={highlightsByPage}
+            highlights={highlights}
+            onOpenHighlight={onOpenHighlight}
             reduceMotion={reduceMotion}
+            interactive={!staticView}
             onPageChange={onPageChange}
             onFlipStart={onFlipStart}
           />
@@ -307,14 +389,15 @@ const ReaderStage = forwardRef<ReaderStageHandle, ReaderStageProps>(function Rea
       </div>
 
       {/* Zoom: página(s) estáticas, más grandes, con desplazamiento por arrastre. */}
-      {zoomed && layout && (
+      {staticView && layout && (
         <div
           ref={scrollRef}
           className={`absolute inset-0 overflow-auto overscroll-contain [scrollbar-width:thin] ${
-            panning ? 'cursor-grabbing' : 'cursor-grab'
+            highlighting ? 'cursor-text' : panning ? 'cursor-grabbing' : 'cursor-grab'
           }`}
         >
-          <div className="flex min-h-full min-w-full p-6">
+          {/* Sin relleno a 100 % (Subrayar): la página queda donde estaba en el flip, sin saltos ni barras. */}
+          <div className={`flex min-h-full min-w-full ${zoomed ? 'p-6' : ''}`}>
             <div
               ref={contentRef}
               className="relative m-auto flex shrink-0 shadow-libro"
@@ -327,7 +410,9 @@ const ReaderStage = forwardRef<ReaderStageHandle, ReaderStageProps>(function Rea
                   pageNumber={p}
                   width={Math.round(layout.w * zoom)}
                   height={Math.round(layout.h * zoom)}
-                  highlights={highlightsByPage.get(p)}
+                  highlights={highlights}
+                  onOpenHighlight={onOpenHighlight}
+                  selectable={highlighting}
                 />
               ))}
             </div>

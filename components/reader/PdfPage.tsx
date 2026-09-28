@@ -2,7 +2,10 @@
 
 import { forwardRef, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { Highlight } from '@/lib/db';
+import type { HighlightBook } from '@/lib/highlightStore';
 import { MAX_CANVAS_PX, type PageCache, type ReaderSignal } from '@/lib/pageCache';
+import HighlightLayer from './HighlightLayer';
+import TextLayer from './TextLayer';
 
 /** Cuántas páginas alrededor de la actual se mantienen pintadas en el flip. */
 export const RENDER_WINDOW = 3;
@@ -20,7 +23,11 @@ interface PdfPageProps {
   height: number;
   /** En el flip, la página se activa según la señal compartida; en el zoom siempre está activa. */
   signal?: ReaderSignal;
-  highlights?: Highlight[];
+  /** Subrayados del libro (store externo: cambiarlos no re-renderiza el canvas). */
+  highlights?: HighlightBook;
+  onOpenHighlight?: (h: Highlight, anchor: HTMLElement) => void;
+  /** Capa de texto seleccionable (solo en la vista estática del modo Subrayar). */
+  selectable?: boolean;
   className?: string;
 }
 
@@ -39,7 +46,7 @@ const noopSubscribe = () => () => {};
  * al nítido cuando está listo. react-pageflip exige forwardRef en cada página.
  */
 const PdfPage = forwardRef<HTMLDivElement, PdfPageProps>(function PdfPage(
-  { cache, pageNumber, width, height, signal, highlights = [], className = '' },
+  { cache, pageNumber, width, height, signal, highlights, onOpenHighlight, selectable = false, className = '' },
   ref,
 ) {
   const slotRef = useRef<HTMLDivElement>(null);
@@ -115,17 +122,8 @@ const PdfPage = forwardRef<HTMLDivElement, PdfPageProps>(function PdfPage(
     >
       <div ref={slotRef} className="absolute inset-0 [&>canvas]:block [&>canvas]:size-full" />
       {/* Subrayados: rects en proporciones 0-1 → porcentajes */}
-      {highlights.flatMap((h) =>
-        h.rects.map((r, i) => (
-          <span
-            key={`${h.id}-${i}`}
-            className={`pointer-events-none absolute rounded-sm mix-blend-multiply ${
-              h.color === 'acento' ? 'bg-acento/40' : 'bg-papel/60'
-            }`}
-            style={{ left: `${r.x * 100}%`, top: `${r.y * 100}%`, width: `${r.w * 100}%`, height: `${r.h * 100}%` }}
-          />
-        )),
-      )}
+      {highlights && <HighlightLayer store={highlights} page={pageNumber} onOpen={onOpenHighlight} />}
+      {selectable && <TextLayer doc={cache.doc} pageNumber={pageNumber} width={width} />}
       {!ready && !slotRef.current?.firstElementChild && (
         <span className="absolute inset-0 grid place-items-center font-display text-4xl text-tinta-suave/20">
           {pageNumber}

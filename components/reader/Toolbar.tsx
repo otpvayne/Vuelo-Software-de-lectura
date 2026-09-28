@@ -10,6 +10,7 @@ import {
   ChevronRight,
   Contrast,
   Focus,
+  Highlighter,
   Keyboard,
   Minus,
   MoreHorizontal,
@@ -32,6 +33,8 @@ interface ToolbarProps {
   pageCount: number;
   bookmarked: boolean;
   notesOpen: boolean;
+  /** Herramienta Subrayar activa. */
+  highlighting: boolean;
   zoom: number;
   paper: PaperMode;
   paperModes: PaperMode[];
@@ -45,6 +48,7 @@ interface ToolbarProps {
   onGoTo(page: number): void;
   onToggleBookmark(): void;
   onToggleNotes(): void;
+  onToggleHighlight(): void;
   onZoomIn(): void;
   onZoomOut(): void;
   onZoomReset(): void;
@@ -319,6 +323,16 @@ export default function Toolbar(props: ToolbarProps) {
         aria-label="Notas"
       >
         <NotebookPen className="size-5" strokeWidth={1.8} />
+      </button>
+      <button
+        type="button"
+        className={`${iconButton} ${props.highlighting ? 'bg-acento text-tinta shadow-suave hover:bg-acento dark:text-fondo' : ''}`}
+        onClick={props.onToggleHighlight}
+        aria-pressed={props.highlighting}
+        aria-label="Subrayar (H)"
+        title="Subrayar (H)"
+      >
+        <Highlighter className="size-5" strokeWidth={1.8} />
       </button>
 
       <span aria-hidden className="mx-1 hidden h-6 w-px bg-linea/15 xl:block" />

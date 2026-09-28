@@ -1,4 +1,4 @@
-import type { Theme } from './constants';
+import { isHighlightColor, type HighlightColor, type Theme } from './constants';
 
 export type PaperMode = 'natural' | 'suave' | 'invertido';
 
@@ -12,6 +12,7 @@ const KEYS = {
   paper: 'vuelo:papel',
   sound: 'vuelo:sonido',
   gestureHint: 'vuelo:pista-gestos',
+  highlightColor: 'vuelo:color-subrayado',
 } as const;
 
 const read = (key: string) => {
@@ -73,3 +74,10 @@ export const setSoundEnabled = (on: boolean) => write(KEYS.sound, on ? 'on' : 'o
 
 export const gestureHintSeen = () => read(KEYS.gestureHint) === '1';
 export const markGestureHintSeen = () => write(KEYS.gestureHint, '1');
+
+/** Último color de subrayado usado (preferencia global). */
+export function getHighlightColor(): HighlightColor {
+  const v = read(KEYS.highlightColor);
+  return isHighlightColor(v) ? v : 'amarillo';
+}
+export const setHighlightColor = (c: HighlightColor) => write(KEYS.highlightColor, c);

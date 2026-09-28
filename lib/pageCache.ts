@@ -30,7 +30,7 @@ export class PageCache {
   private destroyed = false;
   readonly stats: PageCacheStats = { renders: 0, hits: 0, released: 0, lastRenderMs: 0, live: 0 };
 
-  constructor(private readonly doc: PDFDocumentProxy) {}
+  constructor(readonly doc: PDFDocumentProxy) {}
 
   /** Canvas pintado exactamente a `pixelWidth`, si existe. */
   get(page: number, pixelWidth: number): HTMLCanvasElement | null {

@@ -5,7 +5,7 @@
  */
 import type { DBSchema, IDBPDatabase } from 'idb';
 import type TauriDatabase from '@tauri-apps/plugin-sql';
-import { BOOKS_DIR, IDB_NAME, SQLITE_URL, type HighlightColor } from './constants';
+import { BOOKS_DIR, IDB_NAME, SQLITE_URL, isHighlightColor, type HighlightColor } from './constants';
 import { isTauri } from './platform';
 
 // ───────────────────────────── Modelos ─────────────────────────────
@@ -50,10 +50,13 @@ export interface Highlight {
   page: number;
   rects: HighlightRect[];
   color: HighlightColor;
+  /** Texto seleccionado (espacios normalizados). Es la columna `text` de SQLite. */
   text: string | null;
   note: string | null;
   createdAt: number;
 }
+
+export type HighlightPatch = Partial<Pick<Highlight, 'color' | 'note'>>;
 
 export interface Bookmark {
   id: string;
@@ -87,6 +90,9 @@ export interface VueloStore {
 
   listHighlights(bookId: string): Promise<Highlight[]>;
   addHighlight(data: NewHighlight): Promise<Highlight>;
+  /** Vuelve a insertar un subrayado borrado con su id y fecha originales (para "Deshacer"). */
+  restoreHighlight(h: Highlight): Promise<void>;
+  updateHighlight(id: string, patch: HighlightPatch): Promise<void>;
   deleteHighlight(id: string): Promise<void>;
 
   listBookmarks(bookId: string): Promise<Bookmark[]>;
@@ -161,6 +167,9 @@ export const MIGRATIONS: readonly string[] = [
   /* 2 — nombre original del archivo, para avisar de duplicados */ `
   ALTER TABLE books ADD COLUMN file_name TEXT;
   `,
+  /* 3 — subrayados de 4 colores. `note` y `text` (texto seleccionado) ya existen desde la 1. */ `
+  UPDATE highlights SET color = 'amarillo' WHERE color NOT IN ('amarillo', 'verde', 'azul', 'rosa');
+  `,
 ];
 
 // ────────────────────────────── SQLite ─────────────────────────────
@@ -230,7 +239,7 @@ const toHighlight = (r: HighlightRow): Highlight => ({
   bookId: r.book_id,
   page: r.page,
   rects: JSON.parse(r.rects) as HighlightRect[],
-  color: r.color,
+  color: isHighlightColor(r.color) ? r.color : 'amarillo',
   text: r.text,
   note: r.note,
   createdAt: r.created_at,
@@ -363,6 +372,17 @@ async function createSqliteStore(): Promise<VueloStore> {
       );
       return hl;
     },
+    async restoreHighlight(hl) {
+      await db.execute(
+        `INSERT OR REPLACE INTO highlights (id, book_id, page, rects, color, text, note, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [hl.id, hl.bookId, hl.page, JSON.stringify(hl.rects), hl.color, hl.text, hl.note, hl.createdAt],
+      );
+    },
+    async updateHighlight(id, patch) {
+      if (patch.color !== undefined) await db.execute('UPDATE highlights SET color = $2 WHERE id = $1', [id, patch.color]);
+      if (patch.note !== undefined) await db.execute('UPDATE highlights SET note = $2 WHERE id = $1', [id, patch.note]);
+    },
     async deleteHighlight(id) {
       await db.execute('DELETE FROM highlights WHERE id = $1', [id]);
     },
@@ -408,7 +428,7 @@ async function createIdbStore(): Promise<VueloStore> {
   const { openDB } = await import('idb');
   // La versión de IndexedDB sigue a MIGRATIONS para mantener ambos backends alineados.
   const db: IDBPDatabase<VueloIdb> = await openDB<VueloIdb>(IDB_NAME, MIGRATIONS.length, {
-    upgrade(database, oldVersion) {
+    async upgrade(database, oldVersion, _newVersion, tx) {
       // v2 solo añade el campo opcional `fileName`: no cambia la estructura de los stores.
       if (oldVersion < 1) {
         database.createObjectStore('books', { keyPath: 'id' });
@@ -418,6 +438,14 @@ async function createIdbStore(): Promise<VueloStore> {
         const bookmarks = database.createObjectStore('bookmarks', { keyPath: 'id' });
         bookmarks.createIndex('bookId', 'bookId');
         bookmarks.createIndex('bookPage', ['bookId', 'page'], { unique: true });
+      }
+      // v3: colores antiguos ('acento', 'papel') → 'amarillo'.
+      if (oldVersion >= 1 && oldVersion < 3) {
+        let cursor = await tx.objectStore('highlights').openCursor();
+        while (cursor) {
+          if (!isHighlightColor(cursor.value.color)) await cursor.update({ ...cursor.value, color: 'amarillo' });
+          cursor = await cursor.continue();
+        }
       }
     },
   });
@@ -501,6 +529,13 @@ async function createIdbStore(): Promise<VueloStore> {
       const hl: Highlight = { ...data, rects: normalizeRects(data.rects), id: uid(), createdAt: now() };
       await db.put('highlights', hl);
       return hl;
+    },
+    async restoreHighlight(hl) {
+      await db.put('highlights', hl);
+    },
+    async updateHighlight(id, patch) {
+      const hl = await db.get('highlights', id);
+      if (hl) await db.put('highlights', { ...hl, ...patch });
     },
     async deleteHighlight(id) {
       await db.delete('highlights', id);
