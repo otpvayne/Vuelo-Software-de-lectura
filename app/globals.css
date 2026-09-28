@@ -1,0 +1,85 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Design tokens de Vuelo. Único lugar donde viven los HEX.
+ * Los valores van como canales RGB para que Tailwind pueda aplicar opacidad (bg-papel/60).
+ */
+:root,
+[data-theme='dia'] {
+  --fondo: 255 251 243; /* #FFFBF3 */
+  --papel: 246 234 210; /* #F6EAD2 */
+  --tinta: 43 35 64; /* #2B2340 */
+  --acento: 255 180 84; /* #FFB454 */
+  --tinta-suave: 43 35 64;
+  --linea: 43 35 64;
+  --sombra: 43 35 64;
+  color-scheme: light;
+}
+
+[data-theme='sepia'] {
+  --fondo: 241 227 198; /* #F1E3C6 */
+  --papel: 232 213 174; /* #E8D5AE */
+  --tinta: 74 54 38; /* #4A3626 */
+  --acento: 201 119 43; /* #C9772B */
+  --tinta-suave: 74 54 38;
+  --linea: 74 54 38;
+  --sombra: 74 54 38;
+  color-scheme: light;
+}
+
+[data-theme='noche'] {
+  --fondo: 15 10 51; /* #0F0A33 */
+  --papel: 27 20 80; /* #1B1450 */
+  --tinta: 246 234 210; /* #F6EAD2 */
+  --acento: 255 180 84; /* #FFB454 */
+  --tinta-suave: 246 234 210;
+  --linea: 246 234 210;
+  --sombra: 0 0 0;
+  color-scheme: dark;
+}
+
+@layer base {
+  html {
+    @apply bg-fondo text-tinta antialiased;
+  }
+  body {
+    @apply min-h-dvh bg-fondo font-sans text-tinta;
+  }
+  h1,
+  h2,
+  h3 {
+    @apply font-display tracking-tight;
+  }
+  ::selection {
+    @apply bg-acento/40;
+  }
+  :focus-visible {
+    @apply outline-none ring-2 ring-acento ring-offset-2 ring-offset-fondo;
+  }
+}
+
+@layer components {
+  /* Barras flotantes con blur */
+  .barra {
+    @apply border border-linea/10 bg-fondo/70 shadow-suave backdrop-blur-xl backdrop-saturate-150;
+  }
+}
+
+/* Transición suave entre temas: lib/theme.ts añade la clase durante el cambio. */
+html.tema-en-transicion,
+html.tema-en-transicion *,
+html.tema-en-transicion *::before,
+html.tema-en-transicion *::after {
+  transition-property: background-color, border-color, color, fill, stroke, box-shadow !important;
+  transition-duration: 450ms !important;
+  transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1) !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html.tema-en-transicion,
+  html.tema-en-transicion * {
+    transition: none !important;
+  }
+}
