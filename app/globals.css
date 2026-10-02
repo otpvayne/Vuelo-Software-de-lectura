@@ -588,3 +588,100 @@ html.tema-en-transicion *::after {
     animation: none;
   }
 }
+
+/* ── Ventana sin bordes (escritorio) ───────────────────────────────── */
+:root {
+  --titlebar-h: 0px;
+}
+#vuelo-marco,
+#vuelo-scroll {
+  display: contents;
+}
+html[data-ventana='propia'] {
+  --titlebar-h: 2.25rem;
+}
+html[data-ventana='propia'] body {
+  overflow: hidden;
+}
+.barra-titulo {
+  display: none;
+}
+html[data-ventana='propia'] .barra-titulo {
+  display: flex;
+}
+/*
+ * Sin barra nativa, la app vive bajo la barra propia. El marco recorta y es el bloque contenedor de
+ * lo "fixed" (barras, paneles, diálogos), que así queda debajo de la barra de título; el scroll
+ * pasa a #vuelo-scroll y las alturas de pantalla completa se miden contra el marco, no la ventana.
+ */
+html[data-ventana='propia'] #vuelo-marco {
+  display: block;
+  position: fixed;
+  inset: var(--titlebar-h) 0 0 0;
+  contain: layout paint;
+}
+html[data-ventana='propia'] #vuelo-scroll {
+  display: block;
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+}
+html[data-ventana='propia'] .min-h-dvh {
+  min-height: 100%;
+}
+html[data-ventana='propia'] .h-dvh {
+  height: 100%;
+}
+
+/* ── Bienvenida ────────────────────────────────────────────────────── */
+/*
+ * Todo con transform/opacity; las partes del libro vienen de data-parte en WingedBook.
+ * Solo se anima con movimiento permitido: con "reducir movimiento" la marca queda estática.
+ */
+@media (prefers-reduced-motion: no-preference) {
+  .bienvenida .bienvenida-libro [data-parte='pagina-izq'],
+  .bienvenida .bienvenida-libro [data-parte='pagina-der'],
+  .bienvenida .bienvenida-libro [data-parte='paginas'] {
+    transform-origin: 60px 40px;
+    animation: bienvenida-abrir 0.5s cubic-bezier(0.22, 1, 0.36, 1) 0.05s backwards;
+  }
+  .bienvenida .bienvenida-libro [data-parte='texto'] {
+    animation: bienvenida-aparecer 0.35s ease-out 0.4s backwards;
+  }
+  .bienvenida .bienvenida-libro [data-parte='ala-izq'] {
+    transform-origin: 22px 34px;
+    animation: bienvenida-ala-izq 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) 0.35s backwards;
+  }
+  .bienvenida .bienvenida-libro [data-parte='ala-der'] {
+    transform-origin: 98px 34px;
+    animation: bienvenida-ala-der 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) 0.35s backwards;
+  }
+  .bienvenida .bienvenida-libro [data-parte='estrella'] {
+    transform-origin: 60px 15px;
+    animation: bienvenida-estrella 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) 0.8s backwards;
+  }
+  .bienvenida .bienvenida-nombre {
+    animation: bienvenida-subir 0.5s cubic-bezier(0.22, 1, 0.36, 1) 0.55s backwards;
+  }
+  .bienvenida .bienvenida-lema {
+    animation: bienvenida-subir 0.5s cubic-bezier(0.22, 1, 0.36, 1) 0.8s backwards;
+  }
+}
+@keyframes bienvenida-abrir {
+  from { transform: scaleX(0); opacity: 0; }
+}
+@keyframes bienvenida-aparecer {
+  from { opacity: 0; }
+}
+@keyframes bienvenida-ala-izq {
+  from { transform: rotate(-60deg) scale(0.3); opacity: 0; }
+}
+@keyframes bienvenida-ala-der {
+  from { transform: rotate(60deg) scale(0.3); opacity: 0; }
+}
+@keyframes bienvenida-estrella {
+  from { transform: scale(0); opacity: 0; }
+}
+@keyframes bienvenida-subir {
+  from { transform: translateY(10px); opacity: 0; }
+}

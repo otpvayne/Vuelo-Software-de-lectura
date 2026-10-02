@@ -77,7 +77,7 @@ export default function BackupDialog({ open, initialTab = 'exportar', onClose, o
             exit={reduce ? undefined : { y: 16, scale: 0.97 }}
             transition={{ type: 'spring', stiffness: 320, damping: 28 }}
             onClick={(e) => e.stopPropagation()}
-            className="flex max-h-[calc(100dvh-1.5rem)] w-full max-w-lg flex-col overflow-hidden rounded-panel bg-fondo shadow-flotante"
+            className="flex max-h-full w-full max-w-lg flex-col overflow-hidden rounded-panel bg-fondo shadow-flotante"
           >
             <div className="flex items-center justify-between px-5 pb-2 pt-4 sm:px-6">
               <h2 id="respaldo-titulo" className="text-2xl font-semibold">

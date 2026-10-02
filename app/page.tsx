@@ -22,9 +22,11 @@ import NightSky from '@/components/ui/NightSky';
 import Onboarding from '@/components/ui/Onboarding';
 import ThemeToggle from '@/components/ui/ThemeToggle';
 import ReadingSummaryChip from '@/components/stats/ReadingSummaryChip';
+import { marcarBibliotecaLista } from '@/lib/arranque';
 import { APP_NAME, TAGLINE } from '@/lib/constants';
 import { getStore, type Book } from '@/lib/db';
 import { getStoredTheme, setTheme } from '@/lib/theme';
+import { toggleWindowFrame } from '@/lib/windowChrome';
 
 /** El diálogo (y fflate) solo se descargan al abrirlo: no pesan en la carga de la biblioteca. */
 const BackupDialog = dynamic(() => import('@/components/backup/BackupDialog'), { ssr: false });
@@ -50,9 +52,24 @@ export default function LibraryPage() {
         console.error(err);
         setError('No pudimos abrir tu biblioteca.');
         setBooks([]);
-      });
+      })
+      .finally(marcarBibliotecaLista);
   }, []);
   useEffect(loadBooks, [loadBooks]);
+
+  // Esc alterna entre ventana sin bordes y con bordes nativos (en el lector, Esc ya tiene su uso).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented) return;
+      // Menús, diálogos y campos de texto usan Esc para cerrarse o limpiar: ahí no se toca la ventana.
+      if (document.querySelector('[role="dialog"], [role="menu"], [aria-expanded="true"]')) return;
+      const t = e.target as HTMLElement | null;
+      if (t?.matches('input, textarea, select, [contenteditable]')) return;
+      void toggleWindowFrame().catch(console.error);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   // Tras restaurar: recargar libros y aplicar el tema restaurado (si cambió).
   const onRestored = useCallback(() => {

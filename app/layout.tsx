@@ -1,7 +1,10 @@
 import type { Metadata, Viewport } from 'next';
 import { Fraunces, Inter } from 'next/font/google';
 import { APP_NAME, TAGLINE } from '@/lib/constants';
+import TitleBar from '@/components/shell/TitleBar';
+import Bienvenida from '@/components/ui/Bienvenida';
 import { themeInitScript } from '@/lib/theme';
+import { windowChromeInitScript } from '@/lib/windowChrome';
 import './globals.css';
 
 const fraunces = Fraunces({
@@ -34,8 +37,15 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="es" data-theme="dia" className={`${fraunces.variable} ${inter.variable}`} suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+        <script dangerouslySetInnerHTML={{ __html: windowChromeInitScript }} />
       </head>
-      <body>{children}</body>
+      <body>
+        <div id="vuelo-marco">
+          <div id="vuelo-scroll">{children}</div>
+        </div>
+        <TitleBar />
+        <Bienvenida />
+      </body>
     </html>
   );
 }
