@@ -51,12 +51,12 @@ export function buildRestoreSql(ops: RestoreOps): string {
       'DELETE FROM books;',
     );
   }
-  const bookCols = ['id', 'title', 'author', 'file_path', 'page_count', 'current_page', 'progress', 'cover', 'added_at', 'last_opened_at', 'file_name'];
+  const bookCols = ['id', 'title', 'author', 'file_path', 'page_count', 'current_page', 'progress', 'cover', 'added_at', 'last_opened_at', 'file_name', 'format', 'locator'];
   s.push(
     ...insert(
       'books',
       bookCols,
-      ops.books.map((b) => [b.id, b.title, b.author, b.filePath, b.pageCount, b.currentPage, b.progress, b.cover, b.addedAt, b.lastOpenedAt, b.fileName]),
+      ops.books.map((b) => [b.id, b.title, b.author, b.filePath, b.pageCount, b.currentPage, b.progress, b.cover, b.addedAt, b.lastOpenedAt, b.fileName, b.format, b.locator]),
       updateAll(bookCols.slice(1)),
     ),
   );
@@ -69,13 +69,13 @@ export function buildRestoreSql(ops: RestoreOps): string {
       updateAll(['page', 'content', 'updated_at']),
     ),
   );
-  const hlCols = ['id', 'book_id', 'page', 'rects', 'color', 'text', 'note', 'created_at'];
+  const hlCols = ['id', 'book_id', 'page', 'rects', 'color', 'text', 'note', 'created_at', 'cfi', 'chapter_href'];
   s.push(
     ...insert(
       'highlights',
       hlCols,
-      ops.highlights.map((h) => [h.id, h.bookId, h.page, JSON.stringify(h.rects), h.color, h.text, h.note, h.createdAt]),
-      updateAll(['page', 'rects', 'color', 'text', 'note']),
+      ops.highlights.map((h) => [h.id, h.bookId, h.page, JSON.stringify(h.rects), h.color, h.text, h.note, h.createdAt, h.cfi, h.chapterHref]),
+      updateAll(['page', 'rects', 'color', 'text', 'note', 'cfi', 'chapter_href']),
     ),
   );
   // Marcadores: únicos por (libro, página) → si ya existe, se deja el actual.

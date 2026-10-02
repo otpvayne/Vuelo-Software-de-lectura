@@ -7,7 +7,7 @@ import WingedBook from '@/components/ui/WingedBook';
 const hasFiles = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes('Files');
 
 /**
- * Soltar PDF sobre la ventana. Usa eventos HTML5, que funcionan igual en el navegador y en
+ * Soltar PDF o EPUB sobre la ventana. Usa eventos HTML5, que funcionan igual en el navegador y en
  * Tauri (con `dragDropEnabled: false` en la ventana, WebView2/WebKit entregan los File).
  * Así se leen los bytes directamente, sin ampliar los permisos de fs a rutas del usuario.
  */
@@ -86,7 +86,7 @@ export default function DropOverlay({ onFiles }: { onFiles: (files: File[]) => v
               />
             </motion.div>
             <p className="mt-6 font-display text-3xl font-semibold">Suelta tu libro aquí</p>
-            <p className="mt-2 text-sm text-tinta-suave/70">Puedes soltar varios PDF a la vez.</p>
+            <p className="mt-2 text-sm text-tinta-suave/70">Puedes soltar varios PDF o EPUB a la vez.</p>
           </motion.div>
         </motion.div>
       )}

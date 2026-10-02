@@ -9,7 +9,7 @@ const STEPS: { icon: LucideIcon; title: string; body: string }[] = [
   { icon: BookHeart, title: `Bienvenido a ${APP_NAME}`, body: TAGLINE },
   {
     icon: FilePlus2,
-    title: 'Trae tus PDF',
+    title: 'Trae tus PDF y EPUB',
     body: 'Añádelos a tu estantería; se guardan solo en este dispositivo.',
   },
   {

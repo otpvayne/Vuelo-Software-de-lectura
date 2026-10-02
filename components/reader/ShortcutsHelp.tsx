@@ -18,8 +18,14 @@ const SHORTCUTS: [string[], string][] = [
   [['?'], 'Mostrar esta ayuda'],
 ];
 
-export default function ShortcutsHelp({ open, onClose }: { open: boolean; onClose(): void }) {
+/** En EPUB no hay zoom: +/−/0 cambian el tamaño de letra y no hay ampliar con rueda ni doble clic. */
+const EPUB_SHORTCUTS = SHORTCUTS.filter(([keys]) => !keys.some((k) => k === 'rueda' || k === 'Doble clic')).map(([keys, text]) =>
+  text.startsWith('Ampliar') ? ([keys, 'Letra más grande / más pequeña / normal'] as [string[], string]) : ([keys, text] as [string[], string]),
+);
+
+export default function ShortcutsHelp({ open, onClose, epub = false }: { open: boolean; onClose(): void; epub?: boolean }) {
   const reduce = useReducedMotion() ?? false;
+  const list = epub ? EPUB_SHORTCUTS : SHORTCUTS;
   return (
     <AnimatePresence>
       {open && (
@@ -58,7 +64,7 @@ export default function ShortcutsHelp({ open, onClose }: { open: boolean; onClos
               </button>
             </div>
             <dl className="divide-y divide-linea/10">
-              {SHORTCUTS.map(([keys, what]) => (
+              {list.map(([keys, what]) => (
                 <div key={what} className="flex items-center justify-between gap-4 py-2.5">
                   <dt className="flex shrink-0 gap-1">
                     {keys.map((k) => (

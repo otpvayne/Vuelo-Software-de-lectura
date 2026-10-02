@@ -1,5 +1,5 @@
 import { isHighlightColor, type HighlightColor } from '../constants';
-import type { Book, Bookmark, Highlight, HighlightRect, Note, ReadingSession } from '../db';
+import { isBookFormat, type Book, type Bookmark, Highlight, HighlightRect, Note, ReadingSession } from '../db';
 
 export const BACKUP_FORMAT = 'vuelo-backup';
 export const BACKUP_FORMAT_VERSION = 1;
@@ -15,6 +15,8 @@ export const PREF_KEYS = [
   'vuelo:papel',
   'vuelo:sonido',
   'vuelo:color-subrayado',
+  'vuelo:epub-tamano',
+  'vuelo:epub-fuente',
   'vuelo:metas-activas',
   'vuelo:meta-minutos',
   'vuelo:festejados',
@@ -91,7 +93,7 @@ export function validateManifest(raw: unknown, appSchemaVersion: number): Backup
     if (!isObj(b) || !str(b.id, 100) || !str(b.title, 2000) || !str(b.sha256, 64) || !HEX64.test(b.sha256 as string) || !int(b.size) || !(b.file === null || str(b.file, 300))) {
       throw bad('hay un libro mal descrito en el manifiesto');
     }
-    if (b.file !== null && !/^books\/[\w.-]+\.pdf$/.test(b.file as string)) throw bad('ruta de PDF no permitida');
+    if (b.file !== null && !/^books\/[\w.-]+\.(pdf|epub)$/.test(b.file as string)) throw bad('ruta de libro no permitida');
   }
   return raw as unknown as BackupManifest;
 }
@@ -100,7 +102,8 @@ const COLORS_V2 = new Set(['acento', 'papel']);
 
 /**
  * Lleva los datos de un respaldo de un esquema anterior al actual (como las migraciones de la base):
- * v2 añade `fileName`, v3 pasa los colores 'acento'/'papel' a 'amarillo', v4 añade las sesiones.
+ * v2 añade `fileName`, v3 pasa los colores 'acento'/'papel' a 'amarillo', v4 añade las sesiones,
+ * v5 (EPUB) añade `format`/`locator` a los libros y `cfi`/`chapterHref` a los subrayados.
  */
 export function migrateBackupData(raw: unknown, fromSchema: number): unknown {
   if (!isObj(raw)) return raw;
@@ -114,6 +117,14 @@ export function migrateBackupData(raw: unknown, fromSchema: number): unknown {
     );
   }
   if (fromSchema < 4) data.sessions = data.sessions ?? [];
+  if (fromSchema < 5) {
+    if (Array.isArray(data.books)) {
+      data.books = data.books.map((b) => (isObj(b) ? { format: 'pdf', locator: null, ...b } : b));
+    }
+    if (Array.isArray(data.highlights)) {
+      data.highlights = data.highlights.map((h) => (isObj(h) ? { cfi: null, chapterHref: null, ...h } : h));
+    }
+  }
   data.prefs = data.prefs ?? {};
   return data;
 }
@@ -134,7 +145,8 @@ export function validateData(raw: unknown): BackupData {
     if (
       !isObj(b) || !str(b.id, 100) || !str(b.title, 2000) || !optStr(b.author, 2000) || !int(b.pageCount) ||
       !int(b.currentPage) || !num(b.progress) || !optStr(b.cover, 5_000_000) || !num(b.addedAt) ||
-      !(b.lastOpenedAt === null || num(b.lastOpenedAt)) || !optStr(b.fileName, 1000)
+      !(b.lastOpenedAt === null || num(b.lastOpenedAt)) || !optStr(b.fileName, 1000) ||
+      !isBookFormat(b.format) || !optStr(b.locator, 5000)
     ) {
       throw bad('un libro no es válido');
     }
@@ -150,6 +162,8 @@ export function validateData(raw: unknown): BackupData {
       addedAt: b.addedAt as number,
       lastOpenedAt: (b.lastOpenedAt as number | null) ?? null,
       fileName: (b.fileName as string | null) ?? null,
+      format: b.format,
+      locator: (b.locator as string | null) ?? null,
     } satisfies BackupBook;
   });
   const notes = arr('notes').map((n) => {
@@ -161,7 +175,7 @@ export function validateData(raw: unknown): BackupData {
   const highlights = arr('highlights').map((h) => {
     if (
       !isObj(h) || !str(h.id, 100) || !str(h.bookId, 100) || !int(h.page, 1) || !Array.isArray(h.rects) ||
-      !h.rects.every(validRect) || !isHighlightColor(h.color) || !optStr(h.text) || !optStr(h.note) || !num(h.createdAt)
+      !h.rects.every(validRect) || !isHighlightColor(h.color) || !optStr(h.text) || !optStr(h.note) || !num(h.createdAt) || !optStr(h.cfi, 5000) || !optStr(h.chapterHref, 2000)
     ) {
       throw bad('un subrayado no es válido');
     }
@@ -174,6 +188,8 @@ export function validateData(raw: unknown): BackupData {
       text: (h.text as string | null) ?? null,
       note: (h.note as string | null) ?? null,
       createdAt: h.createdAt,
+      cfi: (h.cfi as string | null) ?? null,
+      chapterHref: (h.chapterHref as string | null) ?? null,
     } as Highlight;
   });
   const bookmarks = arr('bookmarks').map((b) => {

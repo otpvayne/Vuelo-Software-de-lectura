@@ -24,6 +24,7 @@ import UndoToast from '@/components/reader/UndoToast';
 import EmptyState from '@/components/ui/EmptyState';
 import { copyText } from '@/lib/clipboard';
 import { HIGHLIGHT_META, type HighlightColor, type Theme } from '@/lib/constants';
+import EpubReader from '@/components/reader/epub/EpubReader';
 import { getStore, type Book, type Bookmark, type Highlight, type HighlightPatch, type Note } from '@/lib/db';
 import type { PageSelection } from '@/lib/highlightGeometry';
 import { markCelebrated, wasCelebrated } from '@/lib/goals';
@@ -71,11 +72,7 @@ const SLIDER_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 
 const isTyping = (t: EventTarget | null) =>
   t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || (t instanceof HTMLElement && t.isContentEditable);
 
-function Reader() {
-  const params = useSearchParams();
-  const id = params.get('id');
-  /** Página pedida desde el Cuaderno (?p=N). Abrir ahí no cambia el progreso. */
-  const requestedPage = Number(params.get('p'));
+function PdfReader({ id, requestedPage }: { id: string | null; requestedPage: number }) {
   const [chapters, setChapters] = useState<Chapter[]>([]);
   const [celebrate, setCelebrate] = useState(false);
   const trackerRef = useRef<ReadingSessionTracker | null>(null);
@@ -671,6 +668,43 @@ function ReaderLoading() {
       <Loader2 className="size-8 text-tinta-suave/50 motion-safe:animate-spin" aria-label="Abriendo libro" />
     </main>
   );
+}
+
+/**
+ * Elige el motor según el formato del libro: PDF (páginas fijas, lector de siempre) o EPUB (texto
+ * que se reajusta). Cada motor carga y libera lo suyo; aquí solo se mira el formato.
+ */
+function Reader() {
+  const params = useSearchParams();
+  const id = params.get('id');
+  /** Página pedida desde el Cuaderno (?p=N). Abrir ahí no cambia el progreso. */
+  const requestedPage = Number(params.get('p'));
+  const [epubBook, setEpubBook] = useState<Book | null>(null);
+  const [kind, setKind] = useState<'pdf' | 'epub' | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setKind(null);
+    if (!id) {
+      setKind('pdf'); // sin id: el lector de PDF muestra «libro perdido»
+      return;
+    }
+    getStore()
+      .then((s) => s.getBook(id))
+      .then((b) => {
+        if (cancelled) return;
+        setEpubBook(b?.format === 'epub' ? b : null);
+        setKind(b?.format === 'epub' ? 'epub' : 'pdf');
+      })
+      .catch(() => !cancelled && setKind('pdf'));
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
+
+  if (kind === null) return <ReaderLoading />;
+  if (kind === 'epub' && epubBook) return <EpubReader key={epubBook.id} book={epubBook} requestedPage={requestedPage} />;
+  return <PdfReader id={id} requestedPage={requestedPage} />;
 }
 
 export default function ReaderPage() {

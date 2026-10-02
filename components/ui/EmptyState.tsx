@@ -13,7 +13,7 @@ interface EmptyStateProps {
 /** Repisa vacía con un libro alado flotando sobre ella. */
 export default function EmptyState({
   title = 'Tu primera aventura empieza aquí',
-  description = 'Añade un PDF —o arrástralo a la ventana— y conviértelo en un libro que se hojea página a página.',
+  description = 'Añade un PDF o un EPUB —o arrástralo a la ventana— y conviértelo en un libro que se hojea página a página.',
   action,
 }: EmptyStateProps) {
   const reduce = useReducedMotion() ?? false;

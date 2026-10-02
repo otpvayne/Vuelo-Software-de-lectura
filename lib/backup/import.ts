@@ -1,6 +1,7 @@
 import { Unzip, UnzipInflate, strFromU8, type UnzipFile } from 'fflate';
 import { MIGRATIONS, getStore, type VueloStore } from '../db';
 import { readPdfInfo } from '../pdf';
+import { readEpubInfo } from '../epub';
 import {
   BackupError,
   DATA_FILE,
@@ -232,9 +233,10 @@ export async function restoreBackup(
           }
           const book = plan.ops.books.find((b) => b.id === planned.bookId);
           if (book && planned.needsCover) {
-            book.cover = (await readPdfInfo(bytes).catch(() => null))?.cover ?? null;
+            const info = await (book.format === 'epub' ? readEpubInfo(bytes) : readPdfInfo(bytes)).catch(() => null);
+            book.cover = info?.cover ?? null;
           }
-          const filePath = await store.putBookFile(planned.bookId, bytes);
+          const filePath = await store.putBookFile(planned.bookId, bytes, book?.format);
           written.push(filePath);
           if (book) book.filePath = filePath;
           done += bytes.length;

@@ -1,6 +1,6 @@
 import { Zip, ZipDeflate, ZipPassThrough, strToU8 } from 'fflate';
 import { APP_NAME } from '../constants';
-import { MIGRATIONS, getStore, type Book } from '../db';
+import { MIGRATIONS, bookExtension, getStore, type Book } from '../db';
 import {
   BACKUP_FORMAT,
   BACKUP_FORMAT_VERSION,
@@ -119,7 +119,7 @@ export async function exportBackup(
       title: b.title,
       sha256: hashes.get(b.id) ?? '',
       size: sizes.get(b.id) ?? 0,
-      file: includePdfs ? `books/${b.id}.pdf` : null,
+      file: includePdfs ? `books/${b.id}.${bookExtension(b.format)}` : null,
     })),
   };
   const data: BackupData = {
@@ -163,7 +163,7 @@ export async function exportBackup(
       for (const b of dump.books as Book[]) {
         check();
         const bytes = await store.readBookFile(b);
-        const f = new ZipPassThrough(`books/${b.id}.pdf`);
+        const f = new ZipPassThrough(`books/${b.id}.${bookExtension(b.format)}`);
         zip.add(f);
         if (!bytes.length) f.push(new Uint8Array(0), true);
         for (let i = 0; i < bytes.length; i += SLICE) {

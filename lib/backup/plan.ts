@@ -121,7 +121,7 @@ export function planRestore(
       idMap.set(b.id, match.id);
       let updated: Book | null = null;
       if (opened(b) > opened(match)) {
-        updated = { ...match, currentPage: b.currentPage, progress: b.progress, lastOpenedAt: b.lastOpenedAt };
+        updated = { ...match, currentPage: b.currentPage, progress: b.progress, lastOpenedAt: b.lastOpenedAt, locator: b.locator ?? match.locator };
         summary.progresoActualizado += 1;
       }
       if (!match.cover && b.cover) updated = { ...(updated ?? match), cover: b.cover };

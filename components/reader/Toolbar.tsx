@@ -24,7 +24,19 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import ThemeToggle from '@/components/ui/ThemeToggle';
+import { EPUB_FONT_MAX, EPUB_FONT_MIN, type EpubFont } from '@/lib/epub';
 import { PAPER_LABELS, type PaperMode } from '@/lib/readerPrefs';
+
+/** EPUB: el zoom se sustituye por tamaño y tipo de letra (el texto se reajusta, no se amplía). */
+export interface FontControls {
+  /** Tamaño en %, p. ej. 110. */
+  percent: number;
+  font: EpubFont;
+  onSmaller(): void;
+  onBigger(): void;
+  onReset(): void;
+  onFont(f: EpubFont): void;
+}
 
 interface ToolbarProps {
   title: string;
@@ -59,6 +71,10 @@ interface ToolbarProps {
   onHelp(): void;
   /** Enlace al Cuaderno del libro. */
   notebookHref: string;
+  /** Solo EPUB. Si está, reemplaza los controles de zoom. */
+  fontControls?: FontControls;
+  /** Las páginas son estimadas (EPUB): se muestran con «≈» y una explicación. */
+  approxPages?: boolean;
 }
 
 const iconButton =
@@ -77,7 +93,8 @@ function PageIndicator({
   pageCount,
   request,
   onGoTo,
-}: Pick<ToolbarProps, 'page' | 'lastVisible' | 'pageCount' | 'onGoTo'> & { request: number }) {
+  approx,
+}: Pick<ToolbarProps, 'page' | 'lastVisible' | 'pageCount' | 'onGoTo'> & { request: number; approx?: boolean }) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
@@ -135,13 +152,72 @@ function PageIndicator({
     <button
       type="button"
       onClick={() => setEditing(true)}
-      title="Ir a página (G)"
+      title={approx ? 'Ir a página (G) · Páginas estimadas: un EPUB se reajusta a tu pantalla y letra' : 'Ir a página (G)'}
       className="whitespace-nowrap rounded-suave px-2.5 py-2 text-sm tabular-nums text-tinta-suave/75 transition-colors hover:bg-papel/70 hover:text-tinta"
     >
       <span className="hidden sm:inline">Página </span>
+      {approx && <span aria-hidden>≈</span>}
       {label}
       <span className="text-tinta-suave/50"> de {pageCount}</span>
     </button>
+  );
+}
+
+function FontTools({ c }: { c: FontControls }) {
+  return (
+    <>
+      <div className="flex items-center rounded-suave" role="group" aria-label="Tamaño de letra">
+        <button
+          type="button"
+          className={`${iconButton} gap-0.5`}
+          onClick={c.onSmaller}
+          disabled={c.percent <= EPUB_FONT_MIN}
+          aria-label="Letra más pequeña (−)"
+          title="Letra más pequeña (−)"
+        >
+          <span aria-hidden className="text-xs font-semibold leading-none">A</span>
+          <Minus className="size-3" strokeWidth={2.4} />
+        </button>
+        <button
+          type="button"
+          onClick={c.onReset}
+          title="Tamaño de letra normal (0)"
+          className="min-w-[3.25rem] rounded-suave px-1 py-2 text-center text-xs font-semibold tabular-nums text-tinta-suave/80 hover:bg-papel/70"
+          aria-label={`Tamaño de letra ${c.percent} %. Restablecer`}
+        >
+          {c.percent}%
+        </button>
+        <button
+          type="button"
+          className={`${iconButton} gap-0.5`}
+          onClick={c.onBigger}
+          disabled={c.percent >= EPUB_FONT_MAX}
+          aria-label="Letra más grande (+)"
+          title="Letra más grande (+)"
+        >
+          <span aria-hidden className="text-base font-semibold leading-none">A</span>
+          <Plus className="size-3" strokeWidth={2.4} />
+        </button>
+      </div>
+      <div role="radiogroup" aria-label="Tipo de letra" className="flex items-center rounded-suave bg-papel/50 p-0.5">
+        {(['serif', 'sans'] as const).map((f) => (
+          <button
+            key={f}
+            type="button"
+            role="radio"
+            aria-checked={c.font === f}
+            aria-label={f === 'serif' ? 'Letra con serifa' : 'Letra sin serifa'}
+            title={f === 'serif' ? 'Con serifa (para leer largo)' : 'Sin serifa'}
+            onClick={() => c.onFont(f)}
+            className={`h-9 rounded-[12px] px-2.5 text-sm font-medium transition-colors ${f === 'serif' ? 'font-display' : 'font-sans'} ${
+              c.font === f ? 'bg-acento text-tinta shadow-suave dark:text-fondo' : 'text-tinta-suave/70 hover:text-tinta'
+            }`}
+          >
+            Aa
+          </button>
+        ))}
+      </div>
+    </>
   );
 }
 
@@ -150,6 +226,9 @@ function Tools(props: ToolbarProps & { compact?: boolean }) {
   const pct = Math.round(zoom * 100);
   return (
     <>
+      {props.fontControls ? (
+        <FontTools c={props.fontControls} />
+      ) : (
       <div className="flex items-center rounded-suave" role="group" aria-label="Zoom">
         <button type="button" className={iconButton} onClick={props.onZoomOut} disabled={zoom <= 1} aria-label="Alejar (−)">
           <Minus className="size-4" strokeWidth={2} />
@@ -167,6 +246,7 @@ function Tools(props: ToolbarProps & { compact?: boolean }) {
           <Plus className="size-4" strokeWidth={2} />
         </button>
       </div>
+      )}
 
       <div role="radiogroup" aria-label="Papel" className="flex items-center rounded-suave bg-papel/50 p-0.5">
         {paperModes.map((m) => {
@@ -299,6 +379,7 @@ export default function Toolbar(props: ToolbarProps) {
         pageCount={pageCount}
         request={props.goToRequest}
         onGoTo={props.onGoTo}
+        approx={props.approxPages}
       />
       <div className="hidden items-center md:flex">
         <button

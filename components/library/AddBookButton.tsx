@@ -9,7 +9,7 @@ interface AddBookButtonProps {
   variant?: 'primary' | 'compact';
 }
 
-/** Abre el selector de archivos (varios PDF a la vez). La importación la hace useBookImport. */
+/** Abre el selector de archivos (varios PDF o EPUB a la vez). La importación la hace useBookImport. */
 export default function AddBookButton({ onFiles, busy = false, variant = 'primary' }: AddBookButtonProps) {
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -23,12 +23,12 @@ export default function AddBookButton({ onFiles, busy = false, variant = 'primar
 
   return (
     <>
-      <input ref={inputRef} type="file" accept="application/pdf,.pdf" multiple hidden onChange={handleFiles} />
+      <input ref={inputRef} type="file" accept="application/pdf,application/epub+zip,.pdf,.epub" multiple hidden onChange={handleFiles} />
       <button
         type="button"
         onClick={() => inputRef.current?.click()}
         aria-label={variant === 'compact' ? 'Añadir libros' : undefined}
-        title={variant === 'compact' ? 'Añadir PDF (también puedes arrastrarlos)' : undefined}
+        title={variant === 'compact' ? 'Añadir PDF o EPUB (también puedes arrastrarlos)' : undefined}
         className={
           variant === 'compact'
             ? 'grid size-11 place-items-center rounded-suave bg-acento text-tinta shadow-suave transition-transform hover:-translate-y-0.5 dark:text-fondo'
@@ -36,7 +36,7 @@ export default function AddBookButton({ onFiles, busy = false, variant = 'primar
         }
       >
         <Icon className={`size-5 ${busy ? 'motion-safe:animate-spin' : ''}`} strokeWidth={2.2} />
-        {variant === 'primary' && 'Añadir PDF'}
+        {variant === 'primary' && 'Añadir libro'}
       </button>
     </>
   );

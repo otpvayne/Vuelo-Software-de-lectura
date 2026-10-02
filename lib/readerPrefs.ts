@@ -1,4 +1,5 @@
 import { isHighlightColor, type HighlightColor, type Theme } from './constants';
+import { clampEpubFont, type EpubFont } from './epub';
 
 export type PaperMode = 'natural' | 'suave' | 'invertido';
 
@@ -81,3 +82,17 @@ export function getHighlightColor(): HighlightColor {
   return isHighlightColor(v) ? v : 'amarillo';
 }
 export const setHighlightColor = (c: HighlightColor) => write(KEYS.highlightColor, c);
+
+// ── EPUB: tamaño y tipo de letra (preferencias globales, como el papel y el sonido) ──
+const EPUB_KEYS = { size: 'vuelo:epub-tamano', font: 'vuelo:epub-fuente' } as const;
+
+export function getEpubFontSize(): number {
+  const n = Number(read(EPUB_KEYS.size));
+  return Number.isFinite(n) && n > 0 ? clampEpubFont(n) : 100;
+}
+export const setEpubFontSize = (pct: number) => write(EPUB_KEYS.size, String(clampEpubFont(pct)));
+
+export function getEpubFont(): EpubFont {
+  return read(EPUB_KEYS.font) === 'sans' ? 'sans' : 'serif';
+}
+export const setEpubFont = (f: EpubFont) => write(EPUB_KEYS.font, f);

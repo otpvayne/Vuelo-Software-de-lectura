@@ -2,7 +2,7 @@
 
 > Cada página, un viaje.
 
-Lector de PDF de escritorio (y Android) hecho con Next.js 14 (export estático) + Tauri v2.
+Lector de PDF y EPUB de escritorio (y Android) hecho con Next.js 14 (export estático) + Tauri v2.
 
 ## Desarrollo
 
@@ -57,10 +57,12 @@ Solo se aplica en el build empaquetado; en `tauri dev` la página la sirve el de
 
 - `script-src 'self'` · sin `'unsafe-eval'` (pdfjs v6 no usa eval; sin `wasmUrl` no carga wasm).
 - `worker-src 'self'` · el worker de pdfjs se sirve desde el propio bundle.
-- `img-src 'self' data:` · portadas guardadas como data URL.
-- `style-src 'self' 'unsafe-inline'` · motion inyecta `<style>` en `AnimatePresence mode="popLayout"`.
+- `img-src 'self' data: blob:` · portadas como data URL; `blob:` solo para las imágenes de un EPUB (epub.ts las extrae del ZIP a `blob:` URL).
+- `style-src 'self' 'unsafe-inline' blob:` · motion inyecta `<style>` en `AnimatePresence mode="popLayout"`; `blob:` para las hojas de estilo de un EPUB.
+- `font-src 'self' blob:` · `blob:` para las tipografías incrustadas en un EPUB.
+- Los capítulos de un EPUB se muestran en un `<iframe srcdoc sandbox="allow-same-origin">` (sin `allow-scripts`: el libro no puede ejecutar código). `frame-src` no hace falta: `about:srcdoc` hereda la política y no es una carga de red.
 - `connect-src 'self' ipc: http://ipc.localhost` · IPC de Tauri. Nada externo.
-- `object-src`, `base-uri`, `form-action`, `frame-ancestors`: `'none'`.
+- `object-src`, `base-uri`, `form-action`, `frame-ancestors`: `'none'`. (epub.ts intenta fijar un `<base>` al leer cada capítulo; `base-uri 'none'` lo bloquea y solo deja un aviso en la consola, no afecta a la lectura.)
 
 ## Instalador sin firmar
 
@@ -106,3 +108,13 @@ Smart App Control bloqueó los ejecutables nuevos (`os error 4551`) al añadir e
    - `npm run tauri build`, abrir `/cuaderno/`, `/lectura/`, el lector y el diálogo de respaldo (carga diferida de fflate): sin eventos `securitypolicyviolation` ni errores de consola; el SVG de la semana, el brillo del camino y la descarga/guardado deben funcionar.
 
 Para poder ejecutar los binarios hace falta firmarlos o que Smart App Control no bloquee la app (decisión del usuario; desactivarlo no tiene vuelta atrás sin reinstalar Windows).
+
+## EPUB
+
+Segundo motor de lectura, junto al de PDF (que no se toca). Librería: [`@likecoin/epub-ts`](https://github.com/likecoin/epub.ts), un reemplazo directo de epub.js (misma API) mantenido, con una sola dependencia (`jszip`) y sin código nativo, así que sirve también para Android. Se descartó `epubjs` 0.3.93 por llevar desde 2023 sin versión nueva y arrastrar `lodash`, `localforage` y `core-js`.
+
+- **Modelo (migración 5)**: `books.format` (`'pdf'` por defecto) y `books.locator` (CFI de la posición); `highlights.cfi` y `highlights.chapter_href`. En un subrayado EPUB `rects` queda en `[]`.
+- **Páginas estimadas**: un EPUB se reajusta, no tiene páginas fijas. `pageCount`, `currentPage` y `page` son *ubicaciones* de ~1 600 caracteres (`locations.generate`), que dependen solo del texto —no del tamaño de letra ni de la ventana— y por eso son estables entre aperturas. Así barra de progreso, notas, marcadores, metas, racha y cuaderno funcionan igual que con PDF; la interfaz las muestra con «≈». La posición exacta es el `locator`.
+- **Duplicados**: mismo formato, nombre de archivo y número de páginas estimadas (igual que PDF; no se guarda hash en la base).
+- **Lector**: modo paginado de epub.js, doble página desde 900 px (como el PDF). Tema y papel se inyectan dentro del iframe con los tokens del tema leídos en vivo (nada de paleta propia). Tamaño (70–220 %) y tipo de letra (serifa / sin serifa del sistema) en la barra, persistentes y dentro del respaldo.
+- Subrayar (H): se guarda al soltar la selección, con su `cfi`; se pinta con los mismos colores y mezcla que en PDF.

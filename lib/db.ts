@@ -11,6 +11,9 @@ import { buildRestoreSql } from './backup/sql';
 
 // ───────────────────────────── Modelos ─────────────────────────────
 
+/** Motor de lectura de un libro: PDF (páginas fijas) o EPUB (texto que se reajusta). */
+export type BookFormat = 'pdf' | 'epub';
+
 export interface Book {
   id: string;
   title: string;
@@ -26,6 +29,13 @@ export interface Book {
   cover: string | null;
   addedAt: number;
   lastOpenedAt: number | null;
+  format: BookFormat;
+  /**
+   * Solo EPUB: posición exacta de lectura (CFI de epub.js). En EPUB, `pageCount` y `currentPage` son
+   * "páginas estimadas" (ubicaciones de ~1 600 caracteres, independientes del tamaño de letra y de la
+   * ventana), de modo que notas, marcadores, racha y metas funcionan igual que con PDF.
+   */
+  locator: string | null;
 }
 
 export interface Note {
@@ -55,6 +65,10 @@ export interface Highlight {
   text: string | null;
   note: string | null;
   createdAt: number;
+  /** Solo EPUB: rango de texto (CFI). En EPUB `rects` queda vacío y `page` es la página estimada. */
+  cfi: string | null;
+  /** Solo EPUB: capítulo (href del spine) del subrayado. */
+  chapterHref: string | null;
 }
 
 export type HighlightPatch = Partial<Pick<Highlight, 'color' | 'note'>>;
@@ -105,21 +119,21 @@ export interface RestoreOps {
   sessions: ReadingSession[];
 }
 
-export type NewBook = Pick<Book, 'title' | 'author' | 'pageCount' | 'cover' | 'fileName'>;
-export type NewHighlight = Omit<Highlight, 'id' | 'createdAt'>;
+export type NewBook = Pick<Book, 'title' | 'author' | 'pageCount' | 'cover' | 'fileName'> & { format?: BookFormat };
+export type NewHighlight = Omit<Highlight, 'id' | 'createdAt' | 'cfi' | 'chapterHref'> & Partial<Pick<Highlight, 'cfi' | 'chapterHref'>>;
 
 export interface VueloStore {
   listBooks(): Promise<Book[]>;
   getBook(id: string): Promise<Book | null>;
-  /** Guarda el archivo PDF y crea el registro del libro. */
+  /** Guarda el archivo (PDF o EPUB, según `data.format`) y crea el registro del libro. */
   addBook(data: NewBook, file: Uint8Array): Promise<Book>;
   readBookFile(book: Book): Promise<Uint8Array>;
   /**
    * Guarda la posición y marca el libro como abierto. `readTo` es la última página
    * visible (en doble página, la derecha) y define el progreso; si se omite, el
-   * progreso no cambia (p. ej. al solo abrir el libro).
+   * progreso no cambia (p. ej. al solo abrir el libro). `locator` (EPUB) guarda la posición exacta.
    */
-  updateReading(id: string, currentPage: number, readTo?: number): Promise<void>;
+  updateReading(id: string, currentPage: number, readTo?: number, locator?: string): Promise<void>;
   deleteBook(id: string): Promise<void>;
 
   listNotes(bookId: string): Promise<Note[]>;
@@ -148,8 +162,8 @@ export interface VueloStore {
   dumpAll(): Promise<LibraryDump>;
   /** Tamaño del PDF en bytes sin leerlo entero. */
   bookFileSize(book: Book): Promise<number>;
-  /** Guarda un PDF para un libro (id nuevo) y devuelve su filePath. */
-  putBookFile(bookId: string, bytes: Uint8Array): Promise<string>;
+  /** Guarda el archivo de un libro (id nuevo) y devuelve su filePath. */
+  putBookFile(bookId: string, bytes: Uint8Array, format?: BookFormat): Promise<string>;
   deleteBookFile(filePath: string): Promise<void>;
   /** Aplica una restauración en UNA transacción: si falla, no cambia nada. */
   applyRestore(ops: RestoreOps): Promise<void>;
@@ -164,6 +178,10 @@ const clamp01 = (n: number) => Math.min(1, Math.max(0, n));
 export function normalizeRects(rects: HighlightRect[]): HighlightRect[] {
   return rects.map((r) => ({ x: clamp01(r.x), y: clamp01(r.y), w: clamp01(r.w), h: clamp01(r.h) }));
 }
+
+export const bookExtension = (format: BookFormat) => (format === 'epub' ? 'epub' : 'pdf');
+export const bookMime = (format: BookFormat) => (format === 'epub' ? 'application/epub+zip' : 'application/pdf');
+export const isBookFormat = (v: unknown): v is BookFormat => v === 'pdf' || v === 'epub';
 
 const progressOf = (page: number, total: number) => (total > 0 ? clamp01(page / total) : 0);
 
@@ -238,6 +256,13 @@ export const MIGRATIONS: readonly string[] = [
   CREATE INDEX IF NOT EXISTS idx_sessions_day ON reading_sessions (day);
   CREATE INDEX IF NOT EXISTS idx_sessions_book ON reading_sessions (book_id);
   `,
+  /* 5 — soporte de EPUB: formato del libro, posición (CFI) y subrayados por rango de texto.
+        Los libros existentes quedan como 'pdf'; `rects` sigue siendo '[]' válido para EPUB. */ `
+  ALTER TABLE books ADD COLUMN format TEXT NOT NULL DEFAULT 'pdf' CHECK (format IN ('pdf', 'epub'));
+  ALTER TABLE books ADD COLUMN locator TEXT;
+  ALTER TABLE highlights ADD COLUMN cfi TEXT;
+  ALTER TABLE highlights ADD COLUMN chapter_href TEXT;
+  `,
 ];
 
 // ────────────────────────────── SQLite ─────────────────────────────
@@ -254,6 +279,8 @@ interface BookRow {
   added_at: number;
   last_opened_at: number | null;
   file_name: string | null;
+  format: BookFormat;
+  locator: string | null;
 }
 interface NoteRow {
   id: string;
@@ -272,6 +299,8 @@ interface HighlightRow {
   text: string | null;
   note: string | null;
   created_at: number;
+  cfi: string | null;
+  chapter_href: string | null;
 }
 interface SessionRow {
   id: string;
@@ -312,6 +341,8 @@ const toBook = (r: BookRow): Book => ({
   addedAt: r.added_at,
   lastOpenedAt: r.last_opened_at,
   fileName: r.file_name,
+  format: isBookFormat(r.format) ? r.format : 'pdf',
+  locator: r.locator ?? null,
 });
 const toNote = (r: NoteRow): Note => ({
   id: r.id,
@@ -330,6 +361,8 @@ const toHighlight = (r: HighlightRow): Highlight => ({
   text: r.text,
   note: r.note,
   createdAt: r.created_at,
+  cfi: r.cfi ?? null,
+  chapterHref: r.chapter_href ?? null,
 });
 const toBookmark = (r: BookmarkRow): Bookmark => ({
   id: r.id,
@@ -371,12 +404,15 @@ async function createSqliteStore(): Promise<VueloStore> {
     },
     async addBook(data, file) {
       const id = uid();
-      const filePath = `${BOOKS_DIR}/${id}.pdf`;
+      const format = data.format ?? 'pdf';
+      const filePath = `${BOOKS_DIR}/${id}.${bookExtension(format)}`;
       if (!(await fs.exists(BOOKS_DIR, base))) await fs.mkdir(BOOKS_DIR, { ...base, recursive: true });
       await fs.writeFile(filePath, file, base);
       const book: Book = {
         id,
         ...data,
+        format,
+        locator: null,
         filePath,
         currentPage: 1,
         progress: 0,
@@ -384,16 +420,16 @@ async function createSqliteStore(): Promise<VueloStore> {
         lastOpenedAt: null,
       };
       await db.execute(
-        `INSERT INTO books (id, title, author, file_path, page_count, current_page, progress, cover, added_at, file_name)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-        [id, book.title, book.author, filePath, book.pageCount, 1, 0, book.cover, book.addedAt, book.fileName],
+        `INSERT INTO books (id, title, author, file_path, page_count, current_page, progress, cover, added_at, file_name, format)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+        [id, book.title, book.author, filePath, book.pageCount, 1, 0, book.cover, book.addedAt, book.fileName, format],
       );
       return book;
     },
     async readBookFile(book) {
       return fs.readFile(book.filePath, base);
     },
-    async updateReading(id, currentPage, readTo) {
+    async updateReading(id, currentPage, readTo, locator) {
       if (readTo === undefined) {
         await db.execute('UPDATE books SET current_page = $2, last_opened_at = $3 WHERE id = $1', [
           id,
@@ -406,9 +442,10 @@ async function createSqliteStore(): Promise<VueloStore> {
         `UPDATE books
          SET current_page = $2,
              progress = CASE WHEN page_count > 0 THEN MIN(1.0, MAX(0.0, CAST($4 AS REAL) / page_count)) ELSE 0 END,
-             last_opened_at = $3
+             last_opened_at = $3,
+             locator = COALESCE($5, locator)
          WHERE id = $1`,
-        [id, currentPage, now(), readTo],
+        [id, currentPage, now(), readTo, locator ?? null],
       );
     },
     async deleteBook(id) {
@@ -451,19 +488,19 @@ async function createSqliteStore(): Promise<VueloStore> {
       return rows.map(toHighlight);
     },
     async addHighlight(data) {
-      const hl: Highlight = { ...data, rects: normalizeRects(data.rects), id: uid(), createdAt: now() };
+      const hl: Highlight = { cfi: null, chapterHref: null, ...data, rects: normalizeRects(data.rects), id: uid(), createdAt: now() };
       await db.execute(
-        `INSERT INTO highlights (id, book_id, page, rects, color, text, note, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-        [hl.id, hl.bookId, hl.page, JSON.stringify(hl.rects), hl.color, hl.text, hl.note, hl.createdAt],
+        `INSERT INTO highlights (id, book_id, page, rects, color, text, note, created_at, cfi, chapter_href)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [hl.id, hl.bookId, hl.page, JSON.stringify(hl.rects), hl.color, hl.text, hl.note, hl.createdAt, hl.cfi, hl.chapterHref],
       );
       return hl;
     },
     async restoreHighlight(hl) {
       await db.execute(
-        `INSERT OR REPLACE INTO highlights (id, book_id, page, rects, color, text, note, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-        [hl.id, hl.bookId, hl.page, JSON.stringify(hl.rects), hl.color, hl.text, hl.note, hl.createdAt],
+        `INSERT OR REPLACE INTO highlights (id, book_id, page, rects, color, text, note, created_at, cfi, chapter_href)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [hl.id, hl.bookId, hl.page, JSON.stringify(hl.rects), hl.color, hl.text, hl.note, hl.createdAt, hl.cfi, hl.chapterHref],
       );
     },
     async updateHighlight(id, patch) {
@@ -530,8 +567,8 @@ async function createSqliteStore(): Promise<VueloStore> {
     async bookFileSize(book) {
       return (await fs.stat(book.filePath, base)).size;
     },
-    async putBookFile(bookId, bytes) {
-      const filePath = `${BOOKS_DIR}/${bookId}.pdf`;
+    async putBookFile(bookId, bytes, format = 'pdf') {
+      const filePath = `${BOOKS_DIR}/${bookId}.${bookExtension(format)}`;
       if (!(await fs.exists(BOOKS_DIR, base))) await fs.mkdir(BOOKS_DIR, { ...base, recursive: true });
       await fs.writeFile(filePath, bytes, base);
       return filePath;
@@ -565,7 +602,14 @@ interface VueloIdb extends DBSchema {
 }
 
 /** Registros guardados antes de la versión 2 no tienen `fileName`. */
-const withDefaults = (book: Book): Book => ({ ...book, fileName: book.fileName ?? null });
+/** Registros anteriores a la v5 no tienen `format`/`locator`; los subrayados, `cfi`/`chapterHref`. */
+const withDefaults = (book: Book): Book => ({
+  ...book,
+  fileName: book.fileName ?? null,
+  format: isBookFormat(book.format) ? book.format : 'pdf',
+  locator: book.locator ?? null,
+});
+const withHighlightDefaults = (h: Highlight): Highlight => ({ ...h, cfi: h.cfi ?? null, chapterHref: h.chapterHref ?? null });
 
 const byPage = <T extends { page: number; createdAt: number }>(a: T, b: T) =>
   a.page - b.page || a.createdAt - b.createdAt;
@@ -593,6 +637,7 @@ async function createIdbStore(): Promise<VueloStore> {
           cursor = await cursor.continue();
         }
       }
+      // v5 (EPUB) solo añade campos opcionales: los registros viejos se normalizan al leerlos.
       // v4: sesiones de lectura.
       if (oldVersion < 4) {
         const sessions = database.createObjectStore('sessions', { keyPath: 'id' });
@@ -616,6 +661,8 @@ async function createIdbStore(): Promise<VueloStore> {
       const book: Book = {
         id,
         ...data,
+        format: data.format ?? 'pdf',
+        locator: null,
         filePath: id,
         currentPage: 1,
         progress: 0,
@@ -624,7 +671,7 @@ async function createIdbStore(): Promise<VueloStore> {
       };
       const tx = db.transaction(['books', 'files'], 'readwrite');
       await Promise.all([
-        tx.objectStore('files').put(new Blob([file.slice()], { type: 'application/pdf' }), id),
+        tx.objectStore('files').put(new Blob([file.slice()], { type: bookMime(book.format) }), id),
         tx.objectStore('books').put(book),
         tx.done,
       ]);
@@ -635,13 +682,14 @@ async function createIdbStore(): Promise<VueloStore> {
       if (!blob) throw new Error(`No se encontró el archivo de "${book.title}"`);
       return new Uint8Array(await blob.arrayBuffer());
     },
-    async updateReading(id, currentPage, readTo) {
+    async updateReading(id, currentPage, readTo, locator) {
       const book = await db.get('books', id);
       if (!book) return;
       await db.put('books', {
         ...book,
         currentPage,
         progress: readTo === undefined ? book.progress : progressOf(readTo, book.pageCount),
+        locator: readTo === undefined ? (book.locator ?? null) : (locator ?? book.locator ?? null),
         lastOpenedAt: now(),
       });
     },
@@ -680,10 +728,10 @@ async function createIdbStore(): Promise<VueloStore> {
     },
 
     async listHighlights(bookId) {
-      return (await db.getAllFromIndex('highlights', 'bookId', bookId)).sort(byPage);
+      return (await db.getAllFromIndex('highlights', 'bookId', bookId)).map(withHighlightDefaults).sort(byPage);
     },
     async addHighlight(data) {
-      const hl: Highlight = { ...data, rects: normalizeRects(data.rects), id: uid(), createdAt: now() };
+      const hl: Highlight = { cfi: null, chapterHref: null, ...data, rects: normalizeRects(data.rects), id: uid(), createdAt: now() };
       await db.put('highlights', hl);
       return hl;
     },
@@ -740,13 +788,13 @@ async function createIdbStore(): Promise<VueloStore> {
         db.getAll('bookmarks'),
         db.getAll('sessions'),
       ]);
-      return { books: books.map(withDefaults), notes, highlights, bookmarks, sessions };
+      return { books: books.map(withDefaults), notes, highlights: highlights.map(withHighlightDefaults), bookmarks, sessions };
     },
     async bookFileSize(book) {
       return (await db.get('files', book.filePath))?.size ?? 0;
     },
-    async putBookFile(bookId, bytes) {
-      await db.put('files', new Blob([bytes.slice()], { type: 'application/pdf' }), bookId);
+    async putBookFile(bookId, bytes, format = 'pdf') {
+      await db.put('files', new Blob([bytes.slice()], { type: bookMime(format) }), bookId);
       return bookId;
     },
     async deleteBookFile(filePath) {

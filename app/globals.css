@@ -685,3 +685,47 @@ html[data-ventana='propia'] .h-dvh {
 @keyframes bienvenida-subir {
   from { transform: translateY(10px); opacity: 0; }
 }
+
+/* ── Lector de EPUB ────────────────────────────────────────────────── */
+/* Botones de página a los lados de la hoja. */
+.epub-lado {
+  position: absolute;
+  top: 50%;
+  z-index: 5;
+  display: grid;
+  width: 2.5rem;
+  height: 4rem;
+  margin-top: -2rem;
+  place-items: center;
+  border-radius: 9999px;
+  color: rgb(var(--tinta-suave) / 0.7);
+  background: rgb(var(--fondo) / 0.7);
+  opacity: 0;
+  transition: opacity 200ms ease;
+}
+.epub-host:hover ~ .epub-lado,
+.epub-lado:hover,
+.epub-lado:focus-visible {
+  opacity: 1;
+}
+.epub-lado:disabled {
+  display: none;
+}
+@media (hover: none) {
+  .epub-lado {
+    opacity: 0.55;
+  }
+}
+/* Subrayados de epub.js (SVG en el documento principal): mismos tokens que los del PDF. */
+/* className de epub.js: una sola clase (usa classList.add), por color. */
+.epub-hl-amarillo { --hl-c: var(--hl-amarillo); }
+.epub-hl-verde { --hl-c: var(--hl-verde); }
+.epub-hl-azul { --hl-c: var(--hl-azul); }
+.epub-hl-rosa { --hl-c: var(--hl-rosa); }
+[class*='epub-hl-'] rect {
+  fill: rgb(var(--hl-c) / var(--hl-a)) !important;
+  fill-opacity: 1 !important;
+  mix-blend-mode: var(--hl-blend) !important;
+  pointer-events: auto;
+  cursor: pointer;
+}
